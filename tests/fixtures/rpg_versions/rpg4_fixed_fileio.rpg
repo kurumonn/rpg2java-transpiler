@@ -1,0 +1,5 @@
+000100C     CUSTKEY       SETLL     CUSTOMER
+000200C                   READE     CUSTOMER
+000300C                   IF        FOUND
+000400C                   WRITE     CUSTOMER_OUT
+000500C                   ENDIF

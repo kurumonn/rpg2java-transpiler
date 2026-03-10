@@ -1,0 +1,9 @@
+000100C                   EVAL      PRICE + TAX    TOTAL
+000200C     TOTAL         IF        LIMIT
+000300C                   CALLP     ALERT_USER
+000400C                   ELSE
+000500C                   WRITE     ORDER_REC
+000600C                   ENDIF
+000700C     CUSTKEY       SETLL     CUSTOMER
+000800C                   READE     CUSTOMER
+000900C                   EXSR      UPDATE_SUB

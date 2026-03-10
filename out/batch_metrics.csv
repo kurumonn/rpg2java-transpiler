@@ -1,0 +1,6 @@
+status,input_path,class_name,input_bytes,elapsed_ms,ms_per_kib,size_band,statements,symbols,todos,todo_rate,error
+ok,./examples/batch/sample_a.rpg,SampleA,101,0,0.0000,<1KiB,6,5,0,0.0000,
+ok,./examples/batch/sample_b.rpg,SampleB,392,0,0.0000,<1KiB,9,5,3,0.3333,
+SUMMARY,,,,,,,2,0,,,
+PERCENTILE,,,p50_ms=0;p95_ms=0;p99_ms=0,,,,,,,,
+SUMMARY_BAND,2,<1KiB,,avg_ms=0.000;median_ms=0;avg_todo_rate=0.1667,,,,,,,

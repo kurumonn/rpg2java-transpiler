@@ -1,0 +1,27 @@
+{
+  "total_statements": 9,
+  "total_symbols": 5,
+  "operation_summary": {
+    "implemented": 6,
+    "stub": 3,
+    "planned": 0
+  },
+  "operations": [
+    {"name": "CALLP", "count": 1, "level": "implemented"},
+    {"name": "ELSE", "count": 1, "level": "implemented"},
+    {"name": "ENDIF", "count": 1, "level": "implemented"},
+    {"name": "EVAL", "count": 1, "level": "implemented"},
+    {"name": "EXSR", "count": 1, "level": "stub"},
+    {"name": "IF", "count": 1, "level": "implemented"},
+    {"name": "READE", "count": 1, "level": "stub"},
+    {"name": "SETLL", "count": 1, "level": "stub"},
+    {"name": "WRITE", "count": 1, "level": "implemented"}
+  ],
+  "todos": [
+    "SETLL: CUSTKEY, CUSTOMER",
+    "READE: CUSTOMER",
+    "EXSR: UPDATE_SUB"
+  ],
+  "diagnostics": [
+  ]
+}

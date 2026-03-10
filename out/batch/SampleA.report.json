@@ -1,0 +1,21 @@
+{
+  "total_statements": 6,
+  "total_symbols": 5,
+  "operation_summary": {
+    "implemented": 6,
+    "stub": 0,
+    "planned": 0
+  },
+  "operations": [
+    {"name": "CALLP", "count": 1, "level": "implemented"},
+    {"name": "ELSE", "count": 1, "level": "implemented"},
+    {"name": "ENDIF", "count": 1, "level": "implemented"},
+    {"name": "EVAL", "count": 1, "level": "implemented"},
+    {"name": "IF", "count": 1, "level": "implemented"},
+    {"name": "WRITE", "count": 1, "level": "implemented"}
+  ],
+  "todos": [
+  ],
+  "diagnostics": [
+  ]
+}

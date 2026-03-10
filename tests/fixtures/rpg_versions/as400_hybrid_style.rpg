@@ -1,0 +1,6 @@
+000100C     KEY           CHAIN     MASTER
+000200C                   IF        *IN90
+000300C                   EXSR      LOGERR
+000400C                   ELSE
+000500C                   EVAL      CNT + 1        CNT
+000600C                   ENDIF

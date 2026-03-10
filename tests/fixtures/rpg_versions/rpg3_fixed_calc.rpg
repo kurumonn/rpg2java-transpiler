@@ -1,0 +1,4 @@
+000100C                   EVAL      PRICE + TAX    TOTAL
+000200C     TOTAL         IF        LIMIT
+000300C                   WRITE     ORDER_REC
+000400C                   ENDIF
