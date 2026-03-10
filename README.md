@@ -226,3 +226,7 @@ cargo run -- --help
 - `--jobs must be >= 1`
   - `--jobs` は1以上を指定してください。
 
+## 15. ライセンス
+
+MIT License を採用しています。  
+詳細は [LICENSE](LICENSE) を参照してください。
