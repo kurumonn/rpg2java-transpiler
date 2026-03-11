@@ -8,10 +8,7 @@ fn make_temp_dir(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("clock error")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!(
-        "rpg2java-{name}-{}-{ts}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("rpg2java-{name}-{}-{ts}", std::process::id()));
     fs::create_dir_all(&dir).expect("failed to create temp dir");
     dir
 }

@@ -4,26 +4,41 @@ use std::path::Path;
 use crate::ir::{IrProgram, IrStmt};
 use crate::parser::{Program, SupportLevel};
 
+#[derive(Debug, Clone)]
+pub struct JavacCheckSummary {
+    pub command: String,
+    pub success: bool,
+    pub exit_code: Option<i32>,
+    pub detail: String,
+}
+
 pub fn write_reports(
     program: &Program,
     ir_program: &IrProgram,
+    java_target: &str,
+    javac_check: Option<&JavacCheckSummary>,
     json_path: Option<&Path>,
     md_path: Option<&Path>,
 ) -> Result<(), String> {
     if let Some(path) = json_path {
-        let body = render_json(program, ir_program);
+        let body = render_json(program, ir_program, java_target, javac_check);
         fs::write(path, body)
             .map_err(|e| format!("failed to write JSON report {}: {e}", path.display()))?;
     }
     if let Some(path) = md_path {
-        let body = render_markdown(program, ir_program);
+        let body = render_markdown(program, ir_program, java_target, javac_check);
         fs::write(path, body)
             .map_err(|e| format!("failed to write Markdown report {}: {e}", path.display()))?;
     }
     Ok(())
 }
 
-fn render_json(program: &Program, ir_program: &IrProgram) -> String {
+fn render_json(
+    program: &Program,
+    ir_program: &IrProgram,
+    java_target: &str,
+    javac_check: Option<&JavacCheckSummary>,
+) -> String {
     let implemented = program
         .op_stats
         .iter()
@@ -44,10 +59,37 @@ fn render_json(program: &Program, ir_program: &IrProgram) -> String {
     let mut out = String::new();
     out.push_str("{\n");
     out.push_str(&format!(
+        "  \"java_target\": \"{}\",\n",
+        escape_json(java_target)
+    ));
+    if let Some(check) = javac_check {
+        out.push_str("  \"javac_check\": {\n");
+        out.push_str(&format!(
+            "    \"command\": \"{}\",\n",
+            escape_json(&check.command)
+        ));
+        out.push_str(&format!("    \"success\": {},\n", check.success));
+        if let Some(code) = check.exit_code {
+            out.push_str(&format!("    \"exit_code\": {},\n", code));
+        } else {
+            out.push_str("    \"exit_code\": null,\n");
+        }
+        out.push_str(&format!(
+            "    \"detail\": \"{}\"\n",
+            escape_json(&check.detail)
+        ));
+        out.push_str("  },\n");
+    } else {
+        out.push_str("  \"javac_check\": null,\n");
+    }
+    out.push_str(&format!(
         "  \"total_statements\": {},\n",
         program.statements.len()
     ));
-    out.push_str(&format!("  \"total_symbols\": {},\n", ir_program.symbols.len()));
+    out.push_str(&format!(
+        "  \"total_symbols\": {},\n",
+        ir_program.symbols.len()
+    ));
     out.push_str("  \"operation_summary\": {\n");
     out.push_str(&format!("    \"implemented\": {},\n", implemented));
     out.push_str(&format!("    \"stub\": {},\n", stub));
@@ -89,10 +131,33 @@ fn render_json(program: &Program, ir_program: &IrProgram) -> String {
     out
 }
 
-fn render_markdown(program: &Program, ir_program: &IrProgram) -> String {
+fn render_markdown(
+    program: &Program,
+    ir_program: &IrProgram,
+    java_target: &str,
+    javac_check: Option<&JavacCheckSummary>,
+) -> String {
     let mut out = String::new();
     out.push_str("# RPG to Java Migration Report\n\n");
     out.push_str("## Summary\n\n");
+    out.push_str(&format!("- Java Target: {}\n", java_target));
+    if let Some(check) = javac_check {
+        let code = check
+            .exit_code
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| String::from("n/a"));
+        out.push_str(&format!(
+            "- Javac Check: {} (command: {}, exit_code: {})\n",
+            if check.success { "success" } else { "failed" },
+            check.command,
+            code
+        ));
+        if !check.detail.is_empty() {
+            out.push_str(&format!("- Javac Detail: {}\n", check.detail));
+        }
+    } else {
+        out.push_str("- Javac Check: skipped\n");
+    }
     out.push_str(&format!("- Statements: {}\n", program.statements.len()));
     out.push_str(&format!("- Symbols: {}\n", ir_program.symbols.len()));
     out.push_str(&format!("- Diagnostics: {}\n", program.diagnostics.len()));

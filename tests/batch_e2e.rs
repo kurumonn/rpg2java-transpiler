@@ -8,10 +8,7 @@ fn make_temp_dir(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("clock error")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!(
-        "rpg2java-{name}-{}-{ts}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("rpg2java-{name}-{}-{ts}", std::process::id()));
     fs::create_dir_all(&dir).expect("failed to create temp dir");
     dir
 }
@@ -84,10 +81,7 @@ fn batch_success_when_all_files_are_valid() {
         &input_dir.join("sample_a.rpg"),
         "EVAL A = 1\nIF A *GT 0\nCALLP HELLO\nENDIF\n",
     );
-    write_file(
-        &input_dir.join("sample_b.rpg"),
-        "EVAL B = 2\nWRITE REC_B\n",
-    );
+    write_file(&input_dir.join("sample_b.rpg"), "EVAL B = 2\nWRITE REC_B\n");
 
     let bin = env!("CARGO_BIN_EXE_rpg2java-transpiler");
     let output = Command::new(bin)
@@ -100,11 +94,57 @@ fn batch_success_when_all_files_are_valid() {
         .output()
         .expect("failed to execute binary");
 
-    assert!(output.status.success(), "expected success when all files are valid");
+    assert!(
+        output.status.success(),
+        "expected success when all files are valid"
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("success=2"), "stderr={stderr}");
     assert!(stderr.contains("failed=0"), "stderr={stderr}");
     assert!(output_dir.join("SampleA.java").exists());
     assert!(output_dir.join("SampleB.java").exists());
+}
+
+#[test]
+fn batch_writes_perf_summary_when_metrics_csv_is_enabled() {
+    let base = make_temp_dir("batch-perf-summary");
+    let input_dir = base.join("in");
+    let output_dir = base.join("out");
+    let metrics_csv = base.join("batch_metrics.csv");
+    fs::create_dir_all(&input_dir).expect("failed to create input dir");
+
+    write_file(
+        &input_dir.join("sample_a.rpg"),
+        "EVAL A = 1\nIF A *GT 0\nCALLP HELLO\nENDIF\n",
+    );
+    write_file(&input_dir.join("sample_b.rpg"), "EVAL B = 2\nWRITE REC_B\n");
+
+    let bin = env!("CARGO_BIN_EXE_rpg2java-transpiler");
+    let output = Command::new(bin)
+        .arg("--batch-dir")
+        .arg(&input_dir)
+        .arg("--output-dir")
+        .arg(&output_dir)
+        .arg("--metrics-csv")
+        .arg(&metrics_csv)
+        .arg("--jobs")
+        .arg("2")
+        .output()
+        .expect("failed to execute binary");
+
+    assert!(
+        output.status.success(),
+        "expected success when all files are valid"
+    );
+
+    let summary_json = base.join("batch_metrics.summary.json");
+    assert!(
+        summary_json.exists(),
+        "expected summary json to be generated"
+    );
+    let body = fs::read_to_string(&summary_json).expect("failed to read summary json");
+    assert!(body.contains("\"summary\""), "body={body}");
+    assert!(body.contains("\"recommendations\""), "body={body}");
+    assert!(body.contains("\"success\": 2"), "body={body}");
 }

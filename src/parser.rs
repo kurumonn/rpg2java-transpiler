@@ -166,7 +166,11 @@ fn parse_fixed_line(
             }
         }
         "MOVEL" => {
-            let right = if !factor2.is_empty() { factor2 } else { factor1 };
+            let right = if !factor2.is_empty() {
+                factor2
+            } else {
+                factor1
+            };
             if !right.is_empty() && !result.is_empty() {
                 Stmt::Assign {
                     left: result.to_string(),
@@ -180,13 +184,21 @@ fn parse_fixed_line(
             }
         }
         "IF" => {
-            let cond = if !factor2.is_empty() { factor2 } else { factor1 };
+            let cond = if !factor2.is_empty() {
+                factor2
+            } else {
+                factor1
+            };
             Stmt::If {
                 cond: cond.to_string(),
             }
         }
         "DOU" => {
-            let cond = if !factor2.is_empty() { factor2 } else { factor1 };
+            let cond = if !factor2.is_empty() {
+                factor2
+            } else {
+                factor1
+            };
             Stmt::DoUntil {
                 cond: cond.to_string(),
             }
