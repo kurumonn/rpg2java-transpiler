@@ -61,7 +61,7 @@ pub fn to_java(program: &IrProgram, class_name: &str, target: JavaTarget) -> Str
             ValueType::Number => " = 0;",
             ValueType::Text => " = \"\";",
             ValueType::Bool => " = false;",
-            ValueType::Unknown => ";",
+            ValueType::Unknown => " = null;",
         };
         push_line(&mut out, 2, &format!("{ty} {java_name}{init}"));
     }
@@ -132,7 +132,7 @@ pub fn to_java(program: &IrProgram, class_name: &str, target: JavaTarget) -> Str
     }
 
     out.push_str("    }\n");
-    out.push_str("\n");
+    out.push('\n');
     for proc in called_methods {
         out.push_str("    private static void ");
         out.push_str(&proc);
@@ -143,11 +143,11 @@ pub fn to_java(program: &IrProgram, class_name: &str, target: JavaTarget) -> Str
     out.push_str("    private static void writeRecord(Object rec) {\n");
     out.push_str("        // TODO: replace with repository/output adapter\n");
     out.push_str("    }\n");
-    out.push_str("\n");
+    out.push('\n');
     out.push_str("    private static void readRecord(Object rec) {\n");
     out.push_str("        // TODO: replace with repository/input adapter\n");
     out.push_str("    }\n");
-    out.push_str("\n");
+    out.push('\n');
     out.push_str("    private static boolean truthy(Object v) {\n");
     out.push_str("        if (v == null) return false;\n");
     out.push_str("        if (v instanceof Boolean) return (Boolean) v;\n");

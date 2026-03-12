@@ -280,6 +280,7 @@ cargo run -- --batch-dir /tmp/rpg_cov_suite/input_all --output-dir /tmp/rpg_cov_
 --update-snapshots              スナップショット更新
 --javac-check                   生成Javaをコンパイル検証（singleは --output 必須）
 --javac-cmd <cmd>               コンパイル検証コマンド（既定: javac）
+--strict                         未対応命令（TODO化対象）をエラー扱い
 ```
 
 バッチ変換:
@@ -296,7 +297,10 @@ cargo run -- --batch-dir /tmp/rpg_cov_suite/input_all --output-dir /tmp/rpg_cov_
 --perf-report-json <file>       改善提案付き性能サマリJSON出力（バッチ専用）
 --javac-check                   各生成Javaをコンパイル検証
 --javac-cmd <cmd>               コンパイル検証コマンド（既定: javac）
+--strict                         未対応命令（TODO化対象）をエラー扱い
 ```
+
+`--strict` を指定した場合、未対応命令（`// TODO` 化対象）が1件でも含まれると失敗終了します。
 
 `--javac-check` を指定した場合、`report.json` / `report.md` に `javac_check` 結果（command/success/exit_code/detail）を出力します。  
 失敗時もレポートを出力したうえでコマンド全体は失敗終了します。
@@ -343,3 +347,30 @@ cargo run -- --help
 
 MIT License を採用しています。  
 詳細は [LICENSE](LICENSE) を参照してください。
+
+## 18. 次のアップデート（商用レベル化）
+
+README上の次期アップデート計画として、商用導入を見据えたタスク分解を `docs/COMMERCIALIZATION_TASK_BREAKDOWN.md` に整理しました。
+
+- 変換精度/未実装命令対応
+- 品質ゲートとテスト戦略
+- リリース運用とサポート体制
+- セキュリティ/コンプライアンス
+
+詳細: `docs/COMMERCIALIZATION_TASK_BREAKDOWN.md`
+
+## 19. 商用導入チェックリスト（着手しやすい項目）
+
+まずは低コストで進められる運用整備から実施してください。
+
+- [ ] `CHANGELOG.md` の更新運用を開始する
+- [ ] リリース前チェックを `docs/RELEASE_POLICY.md` に沿って実施する（`./scripts/release_precheck.sh`）
+- [ ] CI必須ゲート（fmt / clippy / tests / javac-check）の結果を記録する
+- [ ] 実コーパス実行時の手順を `docs/CORPUS_OPERATIONS.md` で標準化する
+
+関連ドキュメント:
+
+- `docs/COMMERCIALIZATION_TASK_BREAKDOWN.md`
+- `docs/RELEASE_POLICY.md`
+- `CHANGELOG.md`
+
