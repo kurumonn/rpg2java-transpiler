@@ -31,6 +31,7 @@ struct Cli {
     java_target: JavaTarget,
     mode: ParseMode,
     jobs: usize,
+    strict: bool,
 }
 
 #[derive(Clone)]
@@ -42,6 +43,7 @@ struct BatchConfig {
     java_target: JavaTarget,
     javac_check: bool,
     javac_cmd: String,
+    strict: bool,
 }
 
 struct BatchFileReport {
@@ -86,6 +88,7 @@ fn run() -> Result<(), String> {
 
     let program: Program = parser::parse_program_with_mode(&source, args.mode);
     let ir_program: IrProgram = ir::build_ir(&program);
+    enforce_strict_mode(&ir_program, args.strict, &input.display().to_string())?;
     let java = transpiler::to_java(&ir_program, &args.class_name, args.java_target);
 
     let output_path = if let Some(out) = &args.output {
@@ -119,13 +122,13 @@ fn run() -> Result<(), String> {
         args.report_md.as_deref(),
     )?;
 
-    if let Some(check) = javac_check_summary.as_ref() {
-        if !check.success {
-            return Err(format!(
-                "javac check failed for output with command '{}': {}",
-                check.command, check.detail
-            ));
-        }
+    if let Some(check) = javac_check_summary.as_ref()
+        && !check.success
+    {
+        return Err(format!(
+            "javac check failed for output with command '{}': {}",
+            check.command, check.detail
+        ));
     }
 
     print_summary(&program, &ir_program, args.java_target);
@@ -182,6 +185,7 @@ fn run_batch(args: &Cli, batch_dir: &Path) -> Result<(), String> {
         java_target: args.java_target,
         javac_check: args.javac_check,
         javac_cmd: args.javac_cmd.clone(),
+        strict: args.strict,
     };
 
     let results: Vec<BatchJobResult> = if args.jobs <= 1 {
@@ -324,13 +328,14 @@ fn run_batch_parallel(
 
 fn process_batch_file(input: &Path, config: &BatchConfig) -> Result<BatchFileReport, String> {
     let metadata =
-        fs::metadata(&input).map_err(|e| format!("stat failed {}: {e}", input.display()))?;
+        fs::metadata(input).map_err(|e| format!("stat failed {}: {e}", input.display()))?;
     let source =
-        fs::read_to_string(&input).map_err(|e| format!("read failed {}: {e}", input.display()))?;
+        fs::read_to_string(input).map_err(|e| format!("read failed {}: {e}", input.display()))?;
     let class_name = class_name_from_path(input);
 
     let program: Program = parser::parse_program_with_mode(&source, config.mode);
     let ir_program: IrProgram = ir::build_ir(&program);
+    enforce_strict_mode(&ir_program, config.strict, &input.display().to_string())?;
     let java = transpiler::to_java(&ir_program, &class_name, config.java_target);
 
     let java_name = format!("{class_name}.java");
@@ -357,15 +362,15 @@ fn process_batch_file(input: &Path, config: &BatchConfig) -> Result<BatchFileRep
         Some(&report_md),
     )?;
 
-    if let Some(check) = javac_check_summary.as_ref() {
-        if !check.success {
-            return Err(format!(
-                "javac check failed for {} with command '{}': {}",
-                java_out.display(),
-                check.command,
-                check.detail
-            ));
-        }
+    if let Some(check) = javac_check_summary.as_ref()
+        && !check.success
+    {
+        return Err(format!(
+            "javac check failed for {} with command '{}': {}",
+            java_out.display(),
+            check.command,
+            check.detail
+        ));
     }
 
     let todos = ir_program
@@ -431,8 +436,8 @@ fn write_metrics_csv(
     }
     out.push_str(&format!("SUMMARY,,,,,,,{},{},,,\n", success, failed));
     out.push_str(&format!(
-        "PERCENTILE,,,{},,,,,,,,\n",
-        format!("p50_ms={};p95_ms={};p99_ms={}", p50, p95, p99)
+        "PERCENTILE,,,p50_ms={};p95_ms={};p99_ms={},,,,,,,,\n",
+        p50, p95, p99
     ));
     append_size_band_summary(&mut out, rows);
     fs::write(path, out).map_err(|e| format!("failed to write metrics CSV {}: {e}", path.display()))
@@ -568,6 +573,7 @@ fn parse_args() -> Result<Cli, String> {
     let mut java_target = JavaTarget::Java21;
     let mut mode = ParseMode::Auto;
     let mut jobs: usize = 1;
+    let mut strict = false;
 
     let args: Vec<String> = env::args().collect();
     let mut i = 1usize;
@@ -682,6 +688,9 @@ fn parse_args() -> Result<Cli, String> {
                     return Err(String::from("--jobs must be >= 1"));
                 }
             }
+            "--strict" => {
+                strict = true;
+            }
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -742,6 +751,7 @@ fn parse_args() -> Result<Cli, String> {
         java_target,
         mode,
         jobs,
+        strict,
     })
 }
 
@@ -755,6 +765,7 @@ fn print_help() {
     println!(
         "                         [--snapshot-dir <dir>] [--update-snapshots] [--javac-check] [--javac-cmd <cmd>]"
     );
+    println!("                         [--strict]");
     println!("Batch mode:");
     println!(
         "  rpg2java-transpiler --batch-dir <dir> [--output-dir <dir>] [--java-target java21|java25-stable] [--mode auto|free|fixed] [--jobs <n>]"
@@ -762,6 +773,36 @@ fn print_help() {
     println!(
         "                         [--snapshot-dir <dir>] [--update-snapshots] [--metrics-csv <file>] [--perf-report-json <file>] [--javac-check] [--javac-cmd <cmd>]"
     );
+    println!("                         [--strict]");
+}
+
+fn enforce_strict_mode(
+    ir_program: &IrProgram,
+    strict: bool,
+    input_label: &str,
+) -> Result<(), String> {
+    if !strict {
+        return Ok(());
+    }
+
+    let mut unknown_ops = Vec::new();
+    for stmt in &ir_program.statements {
+        if let ir::IrStmt::Todo { op, .. } = stmt {
+            unknown_ops.push(op.clone().unwrap_or_else(|| String::from("<RAW>")));
+        }
+    }
+
+    if unknown_ops.is_empty() {
+        return Ok(());
+    }
+
+    unknown_ops.sort();
+    unknown_ops.dedup();
+    Err(format!(
+        "strict mode violation in {}: unsupported operations found: {}",
+        input_label,
+        unknown_ops.join(", ")
+    ))
 }
 
 fn parse_mode(value: &str) -> Result<ParseMode, String> {
