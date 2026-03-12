@@ -1,66 +1,23 @@
-# Real Corpus Operations Guide
+# Real Corpus Operations (Public Summary)
 
-このドキュメントは、実案件RPG資産を安全に変換検証するための運用手順です。
+この文書は公開版の要約です。  
+実コーパス運用の詳細手順・評価基準・内部導線は、公開リポジトリには掲載しません。
 
-## 1. 前提
+## 基本方針
 
-- 実コーパスは **リポジトリ外** に配置する
-- 機密データは匿名化済みであること
-- 実行環境に Rust/Cargo があること
+- 実コーパスは必ずリポジトリ外で管理する
+- 機密情報を含むデータは公開領域へ持ち込まない
+- 実コーパス向け検証はローカル/閉域環境で実施する
 
-推奨ディレクトリ構成:
+## 公開リポジトリで提供する範囲
 
-```text
-/secure/rpg-corpus/
-  ├─ source/      # 匿名化済み元データ（.rpg/.txt）
-  ├─ snapshots/   # 期待出力スナップショット
-  ├─ out/         # 変換結果
-  └─ logs/        # 実行ログ
-```
+- 実コーパスを扱うための基本機能（バッチ変換、レポート、スナップショット）
+- 方針確認のための一般化されたテスト
 
-## 2. 実行コマンド
+## 非公開で扱う範囲
 
-単発検証:
+- 実運用の詳細runbook
+- 内部評価基準・除外条件
+- 実案件固有の運用ノウハウ
 
-```bash
-RPG_REAL_CORPUS_DIR=/secure/rpg-corpus/source \
-RPG_REAL_CORPUS_JOBS=6 \
-cargo test real_corpus_conversion_pipeline -- --nocapture
-```
-
-スナップショット更新（意図的変更時のみ）:
-
-```bash
-RPG_REAL_CORPUS_DIR=/secure/rpg-corpus/source \
-RPG_REAL_CORPUS_JOBS=6 \
-RPG_UPDATE_SNAPSHOTS=1 \
-cargo test real_corpus_conversion_pipeline -- --nocapture
-```
-
-## 3. 運用スクリプト
-
-`scripts/real_corpus_pipeline.sh` を使うと、バッチ変換 + メトリクス + 性能サマリを一括実行できます。
-
-```bash
-./scripts/real_corpus_pipeline.sh /secure/rpg-corpus/source /secure/rpg-corpus/out 6
-```
-
-出力:
-
-- `out/batch/*.java`
-- `out/batch/*.report.json`
-- `out/batch/*.report.md`
-- `out/metrics.csv`
-- `out/metrics.summary.json`
-
-## 4. 判定基準
-
-- 失敗件数 `failed=0`
-- `metrics.summary.json` の `recommendations` に重大事項がない
-- TODO率が高すぎるファイルは別途移行計画を作成
-
-## 5. セキュリティ注意
-
-- 実データを `tests/fixtures` 配下へコピーしない
-- CIへ機密コーパスをアップロードしない
-- ログには個人情報/顧客情報を含めない
+必要に応じて、公開情報だけで再現可能な手順はREADMEの範囲で案内します。

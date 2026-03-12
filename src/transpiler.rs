@@ -31,10 +31,14 @@ pub fn parse_java_target(value: &str) -> Result<JavaTarget, String> {
 pub fn to_java(program: &IrProgram, class_name: &str, target: JavaTarget) -> String {
     let mut out = String::new();
     let class_name = sanitize_ident(class_name);
-    let name_map = build_name_map(program);
+    let name_map = build_name_map(program, &class_name);
+    let proc_map = build_proc_name_map(program, &name_map, &class_name);
     let mut type_map: BTreeMap<String, ValueType> = BTreeMap::new();
     for symbol in &program.symbols {
         type_map.insert(symbol.name.clone(), symbol.ty);
+        type_map
+            .entry(symbol.name.to_ascii_uppercase())
+            .or_insert(symbol.ty);
     }
 
     out.push_str(&format!(
@@ -76,13 +80,26 @@ pub fn to_java(program: &IrProgram, class_name: &str, target: JavaTarget) -> Str
             IrStmt::Assign { left, right } => {
                 let left_name = map_ident(left, &name_map);
                 let left_ty = type_map.get(left).copied().unwrap_or(ValueType::Unknown);
-                let right_expr =
-                    translate_expr(right, &name_map, &type_map, left_ty == ValueType::Number);
-                push_line(&mut out, indent, &format!("{left_name} = {right_expr};"));
+                let rendered = render_assignment_expr(right, &name_map, &type_map, left_ty);
+                if let Some(reason) = rendered.fallback_reason {
+                    push_line(
+                        &mut out,
+                        indent,
+                        &format!("// TODO(FALLBACK_EXPR): {right} ({reason})"),
+                    );
+                }
+                push_line(&mut out, indent, &format!("{left_name} = {};", rendered.java_expr));
             }
             IrStmt::If { cond } => {
-                let cond = translate_cond(cond, &name_map, &type_map);
-                push_line(&mut out, indent, &format!("if ({cond}) {{"));
+                let rendered = render_condition_expr(cond, &name_map, &type_map, false);
+                if let Some(reason) = rendered.fallback_reason {
+                    push_line(
+                        &mut out,
+                        indent,
+                        &format!("// TODO(FALLBACK_COND): {cond} ({reason})"),
+                    );
+                }
+                push_line(&mut out, indent, &format!("if ({}) {{", rendered.java_expr));
                 indent += 1;
             }
             IrStmt::Else => {
@@ -95,8 +112,15 @@ pub fn to_java(program: &IrProgram, class_name: &str, target: JavaTarget) -> Str
                 push_line(&mut out, indent, "}");
             }
             IrStmt::DoUntil { cond } => {
-                let cond = translate_cond(cond, &name_map, &type_map);
-                push_line(&mut out, indent, &format!("while (!({cond})) {{"));
+                let rendered = render_condition_expr(cond, &name_map, &type_map, true);
+                if let Some(reason) = rendered.fallback_reason {
+                    push_line(
+                        &mut out,
+                        indent,
+                        &format!("// TODO(FALLBACK_COND): {cond} ({reason})"),
+                    );
+                }
+                push_line(&mut out, indent, &format!("while (!({})) {{", rendered.java_expr));
                 indent += 1;
             }
             IrStmt::EndDo => {
@@ -104,7 +128,7 @@ pub fn to_java(program: &IrProgram, class_name: &str, target: JavaTarget) -> Str
                 push_line(&mut out, indent, "}");
             }
             IrStmt::Call { proc_name } => {
-                let proc = sanitize_ident(proc_name);
+                let proc = map_ident(proc_name, &proc_map);
                 called_methods.insert(proc.clone());
                 push_line(&mut out, indent, &format!("{proc}();"));
             }
@@ -165,12 +189,7 @@ fn push_line(buf: &mut String, indent: usize, line: &str) {
 }
 
 fn normalize_cond(cond: &str) -> String {
-    cond.replace(" *EQ ", " == ")
-        .replace(" *NE ", " != ")
-        .replace(" *GT ", " > ")
-        .replace(" *LT ", " < ")
-        .replace(" *GE ", " >= ")
-        .replace(" *LE ", " <= ")
+    normalize_rpg_expr_tokens(cond)
 }
 
 fn translate_cond(
@@ -178,12 +197,207 @@ fn translate_cond(
     name_map: &BTreeMap<String, String>,
     type_map: &BTreeMap<String, ValueType>,
 ) -> String {
+    if let Some(single) = translate_single_indicator_cond(cond, name_map) {
+        return single;
+    }
+
     let c = normalize_cond(cond);
+    let c = replace_fixed_indicator_refs(&c);
     if contains_comparator(&c) {
         return translate_expr(&c, name_map, type_map, true);
     }
+    if contains_logical_operator(&c) {
+        return translate_expr(&c, name_map, type_map, false);
+    }
     let expr = translate_expr(&c, name_map, type_map, false);
     format!("truthy({expr})")
+}
+
+fn translate_single_indicator_cond(
+    cond: &str,
+    name_map: &BTreeMap<String, String>,
+) -> Option<String> {
+    let upper = cond.trim().to_ascii_uppercase();
+    if upper.is_empty() {
+        return None;
+    }
+
+    if let Some(ind) = parse_positive_indicator_cond_token(&upper) {
+        let mapped = map_ident(&format!("IN{ind}"), name_map);
+        return Some(format!("truthy({mapped})"));
+    }
+    if let Some(ind) = parse_negative_indicator_cond_token(&upper) {
+        let mapped = map_ident(&format!("IN{ind}"), name_map);
+        return Some(format!("!truthy({mapped})"));
+    }
+    None
+}
+
+struct RenderedExpr {
+    java_expr: String,
+    fallback_reason: Option<String>,
+}
+
+fn render_assignment_expr(
+    expr: &str,
+    name_map: &BTreeMap<String, String>,
+    type_map: &BTreeMap<String, ValueType>,
+    left_ty: ValueType,
+) -> RenderedExpr {
+    let unsupported = detect_unsupported_rpg_tokens(expr);
+    if unsupported.is_empty() {
+        return RenderedExpr {
+            java_expr: translate_expr(expr, name_map, type_map, left_ty == ValueType::Number),
+            fallback_reason: None,
+        };
+    }
+    RenderedExpr {
+        java_expr: fallback_literal_for_type(left_ty).to_string(),
+        fallback_reason: Some(format!(
+            "unsupported RPG token(s): {}",
+            unsupported.join(", ")
+        )),
+    }
+}
+
+fn render_condition_expr(
+    cond: &str,
+    name_map: &BTreeMap<String, String>,
+    type_map: &BTreeMap<String, ValueType>,
+    is_dou: bool,
+) -> RenderedExpr {
+    let unsupported = detect_unsupported_rpg_tokens(cond);
+    if unsupported.is_empty() {
+        return RenderedExpr {
+            java_expr: translate_cond(cond, name_map, type_map),
+            fallback_reason: None,
+        };
+    }
+    RenderedExpr {
+        // DOU fallback to true so generated while(!(true)) does not spin forever.
+        java_expr: if is_dou { "true" } else { "false" }.to_string(),
+        fallback_reason: Some(format!(
+            "unsupported RPG token(s): {}",
+            unsupported.join(", ")
+        )),
+    }
+}
+
+fn fallback_literal_for_type(ty: ValueType) -> &'static str {
+    match ty {
+        ValueType::Number => "0",
+        ValueType::Text => "\"\"",
+        ValueType::Bool => "false",
+        ValueType::Unknown => "null",
+    }
+}
+
+fn detect_unsupported_rpg_tokens(expr: &str) -> Vec<String> {
+    let mut out: BTreeSet<String> = BTreeSet::new();
+    let chars: Vec<char> = expr.chars().collect();
+    let mut i = 0usize;
+    while i < chars.len() {
+        if chars[i] == '\'' || chars[i] == '"' {
+            let quote = chars[i];
+            i += 1;
+            while i < chars.len() && chars[i] != quote {
+                i += 1;
+            }
+            if i < chars.len() {
+                i += 1;
+            }
+            continue;
+        }
+
+        if chars[i] == '*' {
+            let start = i;
+            i += 1;
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let tok: String = chars[start..i].iter().collect();
+            let upper = tok.to_ascii_uppercase();
+            if is_supported_star_token(&upper) {
+                continue;
+            }
+            out.insert(tok);
+            continue;
+        }
+        i += 1;
+    }
+    out.into_iter().collect()
+}
+
+fn is_supported_star_token(token_upper: &str) -> bool {
+    if token_upper.starts_with("*IN")
+        && token_upper.len() > 3
+        && token_upper[3..].chars().all(|c| c.is_ascii_digit())
+    {
+        return true;
+    }
+    matches!(
+        token_upper,
+        "*EQ"
+            | "*NE"
+            | "*GT"
+            | "*LT"
+            | "*GE"
+            | "*LE"
+            | "*AND"
+            | "*OR"
+            | "*NOT"
+            | "*ON"
+            | "*OFF"
+            | "*CAT"
+    )
+}
+
+fn parse_positive_indicator_cond_token(token: &str) -> Option<String> {
+    if token.len() == 2 && token.chars().all(|c| c.is_ascii_digit()) {
+        return Some(token.to_string());
+    }
+    if token.len() == 4 && token.starts_with("IN") && token[2..].chars().all(|c| c.is_ascii_digit())
+    {
+        return Some(token[2..].to_string());
+    }
+    if token.len() == 5
+        && token.starts_with("*IN")
+        && token[3..].chars().all(|c| c.is_ascii_digit())
+    {
+        return Some(token[3..].to_string());
+    }
+    None
+}
+
+fn parse_negative_indicator_cond_token(token: &str) -> Option<String> {
+    if token.len() == 3 && token.starts_with('N') && token[1..].chars().all(|c| c.is_ascii_digit())
+    {
+        return Some(token[1..].to_string());
+    }
+    let rest = token.strip_prefix("NOT ")?;
+    parse_positive_indicator_cond_token(rest)
+}
+
+fn replace_fixed_indicator_refs(cond: &str) -> String {
+    let mut out = String::new();
+    let chars: Vec<char> = cond.chars().collect();
+    let mut i = 0usize;
+    while i < chars.len() {
+        if chars[i] == '*' && i + 4 < chars.len() && chars[i + 1] == 'I' && chars[i + 2] == 'N' {
+            let d1 = chars[i + 3];
+            let d2 = chars[i + 4];
+            if d1.is_ascii_digit() && d2.is_ascii_digit() {
+                out.push_str("IN");
+                out.push(d1);
+                out.push(d2);
+                i += 5;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
 }
 
 fn translate_expr(
@@ -192,12 +406,29 @@ fn translate_expr(
     type_map: &BTreeMap<String, ValueType>,
     numeric_context: bool,
 ) -> String {
+    let normalized_expr = normalize_rpg_expr_tokens(expr);
     let mut out = String::new();
-    let chars: Vec<char> = expr.chars().collect();
+    let chars: Vec<char> = normalized_expr.chars().collect();
     let mut i = 0usize;
 
     while i < chars.len() {
         let ch = chars[i];
+        if ch == '\'' || ch == '"' {
+            let quote = ch;
+            i += 1;
+            let start = i;
+            while i < chars.len() && chars[i] != quote {
+                i += 1;
+            }
+            if i < chars.len() {
+                let raw_content: String = chars[start..i].iter().collect();
+                out.push_str(&to_java_string_literal(&raw_content));
+                i += 1;
+                continue;
+            }
+            out.push(quote);
+            continue;
+        }
         if ch.is_ascii_alphabetic() || ch == '_' {
             let start = i;
             i += 1;
@@ -205,15 +436,21 @@ fn translate_expr(
                 i += 1;
             }
             let raw: String = chars[start..i].iter().collect();
+            if raw.eq_ignore_ascii_case("true") || raw.eq_ignore_ascii_case("false") {
+                out.push_str(&raw.to_ascii_lowercase());
+                continue;
+            }
             let mapped = map_ident(&raw, name_map);
             if numeric_context {
                 let ty = type_map.get(&raw).copied().unwrap_or(ValueType::Unknown);
-                if ty == ValueType::Number {
-                    out.push_str(&mapped);
-                } else {
-                    out.push_str("((Number)");
-                    out.push_str(&mapped);
-                    out.push_str(").doubleValue()");
+                match ty {
+                    ValueType::Number => out.push_str(&mapped),
+                    ValueType::Unknown => {
+                        out.push_str("((Number)");
+                        out.push_str(&mapped);
+                        out.push_str(").doubleValue()");
+                    }
+                    ValueType::Text | ValueType::Bool => out.push_str(&mapped),
                 }
             } else {
                 out.push_str(&mapped);
@@ -226,6 +463,84 @@ fn translate_expr(
     out
 }
 
+fn normalize_rpg_expr_tokens(expr: &str) -> String {
+    let mut out = String::new();
+    let chars: Vec<char> = expr.chars().collect();
+    let mut i = 0usize;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '\'' || ch == '"' {
+            out.push(ch);
+            i += 1;
+            while i < chars.len() {
+                let c = chars[i];
+                out.push(c);
+                i += 1;
+                if c == ch {
+                    break;
+                }
+            }
+            continue;
+        }
+        if ch.is_ascii_whitespace() {
+            out.push(ch);
+            i += 1;
+            continue;
+        }
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '*' {
+            let start = i;
+            i += 1;
+            while i < chars.len()
+                && (chars[i].is_ascii_alphanumeric() || chars[i] == '_' || chars[i] == '*')
+            {
+                i += 1;
+            }
+            let token: String = chars[start..i].iter().collect();
+            out.push_str(&normalize_rpg_token(&token));
+            continue;
+        }
+        out.push(ch);
+        i += 1;
+    }
+    out
+}
+
+fn normalize_rpg_token(token: &str) -> String {
+    let upper = token.to_ascii_uppercase();
+    match upper.as_str() {
+        "*EQ" | "EQ" => String::from("=="),
+        "*NE" | "NE" => String::from("!="),
+        "*GT" | "GT" => String::from(">"),
+        "*LT" | "LT" => String::from("<"),
+        "*GE" | "GE" => String::from(">="),
+        "*LE" | "LE" => String::from("<="),
+        "*AND" | "AND" => String::from("&&"),
+        "*OR" | "OR" => String::from("||"),
+        "*NOT" | "NOT" => String::from("!"),
+        "*CAT" | "CAT" => String::from("+"),
+        "*ON" => String::from("true"),
+        "*OFF" => String::from("false"),
+        _ => {
+            if upper.starts_with("*IN")
+                && upper.len() > 3
+                && upper[3..].chars().all(|c| c.is_ascii_digit())
+            {
+                return format!("IN{}", &upper[3..]);
+            }
+            token.to_string()
+        }
+    }
+}
+
+fn contains_logical_operator(expr: &str) -> bool {
+    expr.contains("&&") || expr.contains("||") || expr.trim_start().starts_with('!')
+}
+
+fn to_java_string_literal(raw: &str) -> String {
+    let escaped = raw.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
+}
+
 fn contains_comparator(expr: &str) -> bool {
     expr.contains("==")
         || expr.contains("!=")
@@ -235,8 +550,14 @@ fn contains_comparator(expr: &str) -> bool {
         || expr.contains('<')
 }
 
-fn build_name_map(program: &IrProgram) -> BTreeMap<String, String> {
+fn build_name_map(program: &IrProgram, class_name: &str) -> BTreeMap<String, String> {
     let mut used = BTreeSet::new();
+    used.insert(class_name.to_string());
+    used.insert(String::from("main"));
+    used.insert(String::from("args"));
+    used.insert(String::from("writeRecord"));
+    used.insert(String::from("readRecord"));
+    used.insert(String::from("truthy"));
     let mut map = BTreeMap::new();
     for symbol in &program.symbols {
         let mut base = sanitize_ident(&symbol.name);
@@ -250,13 +571,59 @@ fn build_name_map(program: &IrProgram) -> BTreeMap<String, String> {
             candidate = format!("{base}_{idx}");
         }
         used.insert(candidate.clone());
-        map.insert(symbol.name.clone(), candidate);
+        map.insert(symbol.name.clone(), candidate.clone());
+        map.entry(symbol.name.to_ascii_uppercase())
+            .or_insert(candidate);
+    }
+    map
+}
+
+fn build_proc_name_map(
+    program: &IrProgram,
+    symbol_name_map: &BTreeMap<String, String>,
+    class_name: &str,
+) -> BTreeMap<String, String> {
+    let mut used = BTreeSet::new();
+    used.insert(class_name.to_string());
+    used.insert(String::from("main"));
+    used.insert(String::from("args"));
+    used.insert(String::from("writeRecord"));
+    used.insert(String::from("readRecord"));
+    used.insert(String::from("truthy"));
+    for mapped in symbol_name_map.values() {
+        used.insert(mapped.clone());
+    }
+
+    let mut map = BTreeMap::new();
+    for stmt in &program.statements {
+        let IrStmt::Call { proc_name } = stmt else {
+            continue;
+        };
+
+        if map.contains_key(proc_name) {
+            continue;
+        }
+
+        let base = sanitize_ident(proc_name);
+        let mut candidate = base.clone();
+        let mut idx = 1usize;
+        while used.contains(&candidate) {
+            idx += 1;
+            candidate = format!("{base}_{idx}");
+        }
+        used.insert(candidate.clone());
+        map.insert(proc_name.clone(), candidate.clone());
+        map.entry(proc_name.to_ascii_uppercase())
+            .or_insert(candidate);
     }
     map
 }
 
 fn map_ident(raw: &str, map: &BTreeMap<String, String>) -> String {
     if let Some(m) = map.get(raw) {
+        return m.clone();
+    }
+    if let Some(m) = map.get(&raw.to_ascii_uppercase()) {
         return m.clone();
     }
     sanitize_ident(raw)

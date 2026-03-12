@@ -1,0 +1,30 @@
+{
+  "java_target": "java21",
+  "javac_check": null,
+  "total_statements": 4,
+  "total_symbols": 5,
+  "symbols": [
+    {"name":"LIMIT","type":"unknown","assigned_lines":[],"referenced_lines":[2]},
+    {"name":"ORDER_REC","type":"unknown","assigned_lines":[],"referenced_lines":[3]},
+    {"name":"PRICE","type":"number","assigned_lines":[],"referenced_lines":[1]},
+    {"name":"TAX","type":"number","assigned_lines":[],"referenced_lines":[1]},
+    {"name":"TOTAL","type":"number","assigned_lines":[1],"referenced_lines":[]}
+  ],
+  "operation_summary": {
+    "implemented": 4,
+    "stub": 0,
+    "planned": 0
+  },
+  "operations": [
+    {"name": "ENDIF", "count": 1, "level": "implemented"},
+    {"name": "EVAL", "count": 1, "level": "implemented"},
+    {"name": "IF", "count": 1, "level": "implemented"},
+    {"name": "WRITE", "count": 1, "level": "implemented"}
+  ],
+  "todos": [
+  ],
+  "subroutine_routes": [
+  ],
+  "diagnostics": [
+  ]
+}

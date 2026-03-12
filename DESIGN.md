@@ -92,3 +92,7 @@ Status (2026-03-09):
 - DEV-10-3: Java code generation templates
 - DEV-10-4: Unsupported syntax reporting
 - DEV-10-5: Batch mode + CI compile validation
+
+Execution Backlog:
+
+- `docs/ROADMAP_TICKETS.md`

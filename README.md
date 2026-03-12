@@ -1,46 +1,28 @@
 # rpg2java-transpiler
 
-RPGソースコードをJavaへ段階的に移行するためのトランスパイラです。  
-Rustで実装されており、現時点では「安全に移行を進めるための土台」を主目的にしています。
+RPGソースをJavaへ段階移行するためのRust製トランスパイラです。  
+目的は「完全自動変換」ではなく、変換可能部分を安全に自動化し、未対応箇所を `TODO` として可視化することです。
 
 ## 1. できること
 
 - RPG風ソース（free/fixed）を解析してJavaスケルトンを生成
 - 不明命令を黙って捨てず、`// TODO:` として残す
 - 変換レポート（JSON/Markdown）を出力
-- バッチ変換（ディレクトリ単位）とCSVメトリクス出力
+- Javaターゲット切替（`java21` / `java25-stable`）
+- バッチ変換（ディレクトリ単位）
 - スナップショット比較による差分検証
 
-## 2. 現在の対応範囲（Phase 0）
+## 2. 対応範囲（現状）
 
-- `EVAL A = B` -> 代入
-- `MOVEL X Y` -> 代入（`Y = X`）
-- `IF / ELSE / ENDIF` -> Javaブロック
-- `CALLP PROC` -> メソッド呼び出し
-- `READ` / `WRITE` -> スタブAPI呼び出し
-- 未対応命令 -> `// TODO:` コメント化
+- `EVAL` / `MOVEL` / `IF` / `ELSE` / `ENDIF` / `DOU` / `ENDDO`
+- `CALLP`（スタブメソッド生成）
+- `READ` / `WRITE`（I/Oスタブ呼び出し）
 - 固定長フォーマット（`--mode fixed`）の基本解析
 - 型付きIRとシンボルトラッキング（基本）
-- Javaコンパイルしやすさ改善:
-  - 推論型に基づくローカル変数宣言
-  - `CALLP`先スタブメソッド自動生成
-  - 条件式フォールバック `truthy(...)`
 
-## 3. 前提環境
+未対応構文は `TODO` 化して、変換結果とレポートに残します。
 
-- Rust（推奨: stable）
-- Cargo
-
-インストール未済の場合:
-
-```bash
-curl https://sh.rustup.rs -sSf | sh
-source "$HOME/.cargo/env"
-rustc --version
-cargo --version
-```
-
-## 4. セットアップ
+## 3. セットアップ
 
 ```bash
 git clone https://github.com/kurumonn/rpg2java-transpiler.git
@@ -48,298 +30,80 @@ cd rpg2java-transpiler
 cargo build
 ```
 
-リリースビルド:
+## 4. 使い方
 
-```bash
-cargo build --release
-```
-
-## 5. 使い方（単一ファイル変換）
-
-標準出力へ生成:
-
-```bash
-cargo run -- --input ./examples/sample.rpg --class-name LegacyOrderMain
-```
-
-ファイルへ書き出し:
+単一ファイル:
 
 ```bash
 cargo run -- \
   --input ./examples/sample.rpg \
-  --output ./out/LegacyOrderMain.java \
-  --class-name LegacyOrderMain
+  --output ./out/Sample.java \
+  --class-name Sample \
+  --mode auto
 ```
 
-固定長フォーマットを明示:
-
-```bash
-cargo run -- \
-  --input ./examples/sample_fixed.rpg \
-  --mode fixed \
-  --class-name LegacyFixedMain
-```
-
-`--mode` の指定値:
-
-- `auto`（既定）
-- `free`
-- `fixed`
-
-## 6. レポート出力
+レポート出力:
 
 ```bash
 cargo run -- \
   --input ./examples/sample.rpg \
-  --class-name LegacyOrderMain \
-  --report-json ./out/report.json \
-  --report-md ./out/report.md
+  --output ./out/Sample.java \
+  --report-json ./out/Sample.report.json \
+  --report-md ./out/Sample.report.md
 ```
 
-## 7. バッチ変換（ディレクトリ単位）
+バッチ変換:
 
 ```bash
 cargo run -- \
   --batch-dir ./examples \
   --output-dir ./out/batch \
-  --mode auto \
-  --jobs 4 \
-  --metrics-csv ./out/batch_metrics.csv
+  --jobs 4
 ```
 
-バッチモードの挙動:
+## 5. 主なCLIオプション
 
-- `.rpg` / `.txt` ファイルを対象に処理
-- 一部失敗しても他ファイルの処理を継続
-- 最後に `success/failed` を集計表示
-- 1件でも失敗があれば終了コードは非0
-
-## 8. スナップショット検証
-
-初回作成/更新:
-
-```bash
-cargo run -- \
-  --input ./examples/sample.rpg \
-  --output ./out/LegacyOrderMain.java \
-  --snapshot-dir ./out/snapshots \
-  --update-snapshots
-```
-
-差分チェック:
-
-```bash
-cargo run -- \
-  --input ./examples/sample.rpg \
-  --output ./out/LegacyOrderMain.java \
-  --snapshot-dir ./out/snapshots
-```
-
-## 9. テスト実行
-
-互換マトリクステスト:
-
-```bash
-cargo test compat_matrix
-```
-
-対象フィクスチャ:
-
-- RPG III fixed（算術/制御）
-- RPG IV fixed（`SETLL` / `READE`）
-- ILE RPG `/FREE`（ループ/プロシージャ呼び出し）
-- AS400ハイブリッド（`CHAIN` / `EXSR`）
-
-実コーパスE2E（ローカル限定）:
-
-```bash
-export RPG_REAL_CORPUS_DIR=/path/to/anonymized_or_internal_rpg_corpus
-export RPG_REAL_CORPUS_JOBS=6
-# export RPG_UPDATE_SNAPSHOTS=1  # 意図的に更新する時だけ
-cargo test real_corpus_conversion_pipeline -- --nocapture
-```
-
-注意:
-
-- `RPG_REAL_CORPUS_DIR` 未設定なら自動スキップ
-- 機密ソースはリポジトリ外で管理
-
-実コーパスの運用手順:
-
-- `docs/CORPUS_OPERATIONS.md`
-
-実行補助スクリプト:
-
-- `scripts/real_corpus_pipeline.sh`（実コーパス一括変換）
-- `scripts/perf_smoke.sh`（性能スモーク計測）
-
-```bash
-# 実コーパス一括変換
-./scripts/real_corpus_pipeline.sh /secure/rpg-corpus/source ./out/real-corpus 6
-
-# 性能スモーク計測
-./scripts/perf_smoke.sh ./examples/batch 4
-```
-
-## 10. 変換カバレッジ実測（2026-03-12）
-
-ローカルで実際にバッチ変換を実行し、RPG -> Java 変換の到達度を計測した結果です。
-
-### 10.1 既存コーパス（8ファイル）
-
-実行コマンド:
-
-```bash
-cargo run -- --batch-dir /tmp/rpg_cov_suite/input --output-dir /tmp/rpg_cov_suite/out --mode auto --jobs 4 --metrics-csv /tmp/rpg_cov_suite/metrics.csv --perf-report-json /tmp/rpg_cov_suite/perf.summary.json
-```
-
-結果:
-
-- success: `8`
-- failed: `0`
-- files: `8`
-- total_statements: `50`
-- total_symbols: `30`
-- op_implemented: `39`
-- op_stub: `10`
-- op_planned: `0`
-- total_todos: `10`
-- files_with_todo: `4`
-
-TODO主要内訳:
-
-- `EXSR`: 3
-- `READE`: 3
-- `SETLL`: 3
-- `CHAIN`: 1
-
-### 10.2 拡張コーパス（32ファイル, 網羅寄り）
-
-24件の合成RPGケースを追加し、既存8件と合わせて検証しました。
-
-`--mode auto`:
-
-```bash
-cargo run -- --batch-dir /tmp/rpg_cov_suite/input_all --output-dir /tmp/rpg_cov_suite/out_all --mode auto --jobs 4 --metrics-csv /tmp/rpg_cov_suite/metrics_all.csv --perf-report-json /tmp/rpg_cov_suite/perf_all.summary.json
-```
-
-- success: `32`
-- failed: `0`
-- total_statements: `145`
-- implemented_ops: `96`
-- stub_ops: `10`
-- total_todos: `29`
-- files_with_todo: `13`
-- avg_todo_rate: `0.2365`
-
-`--mode free`:
-
-```bash
-cargo run -- --batch-dir /tmp/rpg_cov_suite/input_all --output-dir /tmp/rpg_cov_suite/out_all_free --mode free --jobs 4 --metrics-csv /tmp/rpg_cov_suite/metrics_all_free.csv --perf-report-json /tmp/rpg_cov_suite/perf_all_free.summary.json
-```
-
-- success: `32`
-- failed: `0`
-- implemented_ops: `81`
-- stub_ops: `0`
-- total_todos: `44`
-- avg_todo_rate: `0.2760`
-
-観測ポイント:
-
-- 変換処理としての成功率は `100%`（32/32）
-- `auto` は `free` より TODO 率が低く、混在入力に対して有利
-- 未実装の主因は `EXSR/READE/SETLL/CHAIN` 系
-
-環境制約:
-
-- 本計測環境では `javac` 未導入のため、Javaコンパイル実行結果は未計測です（`javac: command not found`）
-
-## 11. CI
-
-`.github/workflows/ci.yml` で以下を自動実行します。
-
-- `cargo fmt --check`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo test --tests`
-- 生成Javaの `javac` コンパイル検証（Java 21）
-
-## 12. CLI引数一覧
-
-単体変換:
-
-```text
---input <file>                  入力ファイル（-i）
---output <file>                 出力Javaファイル（-o）
---class-name <name>             生成クラス名（既定: MainProgram）
---java-target <name>            Java出力ターゲット（java21|java25-stable, 既定: java21）
---mode auto|free|fixed          解析モード（既定: auto）
---report-json <file>            JSONレポート出力
---report-md <file>              Markdownレポート出力
---snapshot-dir <dir>            スナップショット保存先
---update-snapshots              スナップショット更新
---javac-check                   生成Javaをコンパイル検証（singleは --output 必須）
---javac-cmd <cmd>               コンパイル検証コマンド（既定: javac）
-```
-
-バッチ変換:
-
-```text
---batch-dir <dir>               入力ディレクトリ
---output-dir <dir>              出力ディレクトリ（既定: ./out/batch）
---java-target <name>            Java出力ターゲット（java21|java25-stable, 既定: java21）
---mode auto|free|fixed          解析モード
---jobs <n>                      並列数（1以上）
---snapshot-dir <dir>            スナップショット保存先
---update-snapshots              スナップショット更新
---metrics-csv <file>            CSVメトリクス出力（バッチ専用）
---perf-report-json <file>       改善提案付き性能サマリJSON出力（バッチ専用）
---javac-check                   各生成Javaをコンパイル検証
---javac-cmd <cmd>               コンパイル検証コマンド（既定: javac）
-```
-
-`--javac-check` を指定した場合、`report.json` / `report.md` に `javac_check` 結果（command/success/exit_code/detail）を出力します。  
-失敗時もレポートを出力したうえでコマンド全体は失敗終了します。
-
-`--metrics-csv` を指定した場合、同じディレクトリに `*.summary.json`（性能改善提案付きサマリ）を自動生成します。  
-`--perf-report-json` を指定すると出力先を明示できます。
-
-ヘルプ:
+- `--input`, `--output`, `--class-name`
+- `--batch-dir`, `--output-dir`, `--jobs`
+- `--mode auto|free|fixed`
+- `--java-target java21|java25-stable`
+- `--report-json`, `--report-md`
+- `--snapshot-dir`, `--update-snapshots`
+- `--metrics-csv`, `--perf-report-json`
+- `--javac-check`, `--javac-cmd`
 
 ```bash
 cargo run -- --help
 ```
 
-## 13. 変換品質の考え方
+## 6. テスト
 
-- 未知構文は落とさず `TODO` 化して可視化
-- 段階移行向けに「まず動く骨格」を優先
-- 変換後の人手レビューを前提に設計
+```bash
+cargo test --tests
+```
 
-## 14. セーフティ設計
+代表的な回帰テスト:
 
-- 動的コード実行なし
-- コンバータ内部でネットワークアクセスなし
-- 入力はプレーンテキストとしてのみ扱う
-- 未知構文の黙殺なし（必ず `TODO` として残す）
+- `cargo test compat_matrix`
+- `cargo test snapshot_matrix_e2e`
+- `cargo test security_boundary_e2e`
 
-## 15. 開発ロードマップ
+## 7. 公開ポリシー
 
-- Phase 1: fixed-format RPG lexer/parser（進行中）
-- Phase 2: 型付きIRとシンボルテーブル（進行中）
-- Phase 3: Javaテンプレート強化とコンパイル適合性改善（進行中）
-- Phase 4: 意味検証・テスト拡張・差分レポート強化
+- 実コーパス（実案件データ）はリポジトリ外で管理
+- 公開READMEには実運用導線の詳細は掲載しない
+- 変換方針・CLI・検証方法を中心に公開
 
-## 16. よくあるエラー
+詳細方針:
 
-- `either --input or --batch-dir is required`
-  - `--input` か `--batch-dir` のどちらかを指定してください。
-- `--input and --batch-dir are mutually exclusive`
-  - 単体モードとバッチモードは同時指定できません。
-- `--jobs must be >= 1`
-  - `--jobs` は1以上を指定してください。
+- `docs/PUBLIC_RELEASE_POLICY.md`
 
-## 17. ライセンス
+## 8. 追加ドキュメント
 
-MIT License を採用しています。  
-詳細は [LICENSE](LICENSE) を参照してください。
+- 変換カバレッジ実測: `docs/coverage-report.md`
+- 開発台帳: `docs/ROADMAP_TICKETS.md`
+- 実コーパス運用方針（公開版要約）: `docs/CORPUS_OPERATIONS.md`
+
+## 9. ライセンス
+
+MIT License

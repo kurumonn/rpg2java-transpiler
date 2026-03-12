@@ -1,0 +1,38 @@
+{
+  "java_target": "java21",
+  "javac_check": null,
+  "total_statements": 6,
+  "total_symbols": 8,
+  "symbols": [
+    {"name":"CNT","type":"number","assigned_lines":[5],"referenced_lines":[5]},
+    {"name":"IN90","type":"bool","assigned_lines":[],"referenced_lines":[2]},
+    {"name":"KEY","type":"unknown","assigned_lines":[],"referenced_lines":[1]},
+    {"name":"LOGERR","type":"unknown","assigned_lines":[],"referenced_lines":[3]},
+    {"name":"MASTER","type":"unknown","assigned_lines":[],"referenced_lines":[1]},
+    {"name":"file","type":"unknown","assigned_lines":[],"referenced_lines":[1]},
+    {"name":"key","type":"unknown","assigned_lines":[],"referenced_lines":[1]},
+    {"name":"subroutine","type":"unknown","assigned_lines":[],"referenced_lines":[3]}
+  ],
+  "operation_summary": {
+    "implemented": 4,
+    "stub": 2,
+    "planned": 0
+  },
+  "operations": [
+    {"name": "CHAIN", "count": 1, "level": "stub"},
+    {"name": "ELSE", "count": 1, "level": "implemented"},
+    {"name": "ENDIF", "count": 1, "level": "implemented"},
+    {"name": "EVAL", "count": 1, "level": "implemented"},
+    {"name": "EXSR", "count": 1, "level": "stub"},
+    {"name": "IF", "count": 1, "level": "implemented"}
+  ],
+  "todos": [
+    "CHAIN: key=KEY, file=MASTER",
+    "EXSR: subroutine=LOGERR"
+  ],
+  "subroutine_routes": [
+    {"caller":"MAIN","callee":"LOGERR","line":3}
+  ],
+  "diagnostics": [
+  ]
+}

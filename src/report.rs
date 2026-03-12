@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::Path;
 
-use crate::ir::{IrProgram, IrStmt};
-use crate::parser::{Program, SupportLevel};
+use crate::ir::{IrProgram, IrStmt, ValueType};
+use crate::parser::{Diagnostic, Program, SubroutineRoute, SupportLevel};
 
 #[derive(Debug, Clone)]
 pub struct JavacCheckSummary {
@@ -90,6 +90,23 @@ fn render_json(
         "  \"total_symbols\": {},\n",
         ir_program.symbols.len()
     ));
+    out.push_str("  \"symbols\": [\n");
+    for (idx, sym) in ir_program.symbols.iter().enumerate() {
+        let comma = if idx + 1 == ir_program.symbols.len() {
+            ""
+        } else {
+            ","
+        };
+        out.push_str(&format!(
+            "    {{\"name\":\"{}\",\"type\":\"{}\",\"assigned_lines\":{},\"referenced_lines\":{}}}{}\n",
+            escape_json(&sym.name),
+            value_type_name(sym.ty),
+            render_lines_json(&sym.assigned_lines),
+            render_lines_json(&sym.referenced_lines),
+            comma
+        ));
+    }
+    out.push_str("  ],\n");
     out.push_str("  \"operation_summary\": {\n");
     out.push_str(&format!("    \"implemented\": {},\n", implemented));
     out.push_str(&format!("    \"stub\": {},\n", stub));
@@ -117,6 +134,22 @@ fn render_json(
         out.push_str(&format!("    \"{}\"{}\n", escape_json(todo), comma));
     }
     out.push_str("  ],\n");
+    out.push_str("  \"subroutine_routes\": [\n");
+    for (idx, route) in program.subroutine_routes.iter().enumerate() {
+        let comma = if idx + 1 == program.subroutine_routes.len() {
+            ""
+        } else {
+            ","
+        };
+        out.push_str(&format!(
+            "    {{\"caller\":\"{}\",\"callee\":\"{}\",\"line\":{}}}{}\n",
+            escape_json(&route.caller),
+            escape_json(&route.callee),
+            route.line,
+            comma
+        ));
+    }
+    out.push_str("  ],\n");
     out.push_str("  \"diagnostics\": [\n");
     for (idx, d) in program.diagnostics.iter().enumerate() {
         let comma = if idx + 1 == program.diagnostics.len() {
@@ -124,7 +157,15 @@ fn render_json(
         } else {
             ","
         };
-        out.push_str(&format!("    \"{}\"{}\n", escape_json(d), comma));
+        out.push_str(&format!(
+            "    {{\"severity\":\"{}\",\"code\":\"{}\",\"line\":{},\"column\":{},\"message\":\"{}\"}}{}\n",
+            d.severity.as_str(),
+            escape_json(&d.code),
+            opt_usize_json(d.line),
+            opt_usize_json(d.column),
+            escape_json(&d.message),
+            comma
+        ));
     }
     out.push_str("  ]\n");
     out.push_str("}\n");
@@ -176,6 +217,20 @@ fn render_markdown(
     }
     out.push('\n');
 
+    out.push_str("## Symbols\n\n");
+    out.push_str("| Symbol | Type | Assigned Lines | Referenced Lines |\n");
+    out.push_str("|---|---|---|---|\n");
+    for sym in &ir_program.symbols {
+        out.push_str(&format!(
+            "| {} | {} | {} | {} |\n",
+            sym.name,
+            value_type_name(sym.ty),
+            lines_for_md(&sym.assigned_lines),
+            lines_for_md(&sym.referenced_lines)
+        ));
+    }
+    out.push('\n');
+
     let todos = collect_todos(ir_program);
     out.push_str("## Unsupported / TODO Items\n\n");
     if todos.is_empty() {
@@ -187,12 +242,22 @@ fn render_markdown(
     }
     out.push('\n');
 
+    out.push_str("## Subroutine Routes\n\n");
+    if program.subroutine_routes.is_empty() {
+        out.push_str("- none\n");
+    } else {
+        for route in &program.subroutine_routes {
+            out.push_str(&format!("- {}\n", format_subroute_markdown(route)));
+        }
+    }
+    out.push('\n');
+
     out.push_str("## Diagnostics\n\n");
     if program.diagnostics.is_empty() {
         out.push_str("- none\n");
     } else {
         for d in &program.diagnostics {
-            out.push_str(&format!("- {}\n", d));
+            out.push_str(&format!("- {}\n", format_diagnostic_markdown(d)));
         }
     }
     out
@@ -225,4 +290,59 @@ fn escape_json(value: &str) -> String {
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace('\n', "\\n")
+}
+
+fn opt_usize_json(value: Option<usize>) -> String {
+    match value {
+        Some(v) => v.to_string(),
+        None => String::from("null"),
+    }
+}
+
+fn format_diagnostic_markdown(d: &Diagnostic) -> String {
+    let mut out = format!("[{}][{}]", d.severity.as_str(), d.code);
+    if let Some(line) = d.line {
+        out.push_str(&format!(" line {}", line));
+        if let Some(col) = d.column {
+            out.push_str(&format!(" col {}", col));
+        }
+    }
+    out.push_str(&format!(": {}", d.message));
+    out
+}
+
+fn format_subroute_markdown(route: &SubroutineRoute) -> String {
+    format!("{} -> {} (line {})", route.caller, route.callee, route.line)
+}
+
+fn value_type_name(ty: ValueType) -> &'static str {
+    match ty {
+        ValueType::Number => "number",
+        ValueType::Text => "text",
+        ValueType::Bool => "bool",
+        ValueType::Unknown => "unknown",
+    }
+}
+
+fn render_lines_json(lines: &[usize]) -> String {
+    let mut out = String::from("[");
+    for (idx, line) in lines.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        out.push_str(&line.to_string());
+    }
+    out.push(']');
+    out
+}
+
+fn lines_for_md(lines: &[usize]) -> String {
+    if lines.is_empty() {
+        return String::from("-");
+    }
+    lines
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
 }

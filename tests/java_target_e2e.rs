@@ -53,7 +53,7 @@ fn java_target_is_reflected_in_output_and_report() {
     let java_body = fs::read_to_string(&output_java).expect("failed to read java output");
     assert!(java_body.contains("target=java25-stable"));
     assert!(java_body.contains("public class class_v"));
-    assert!(java_body.contains("double class_v = 0;"));
+    assert!(java_body.contains("double class_v_2 = 0;"));
     assert!(java_body.contains("switch_v();"));
 
     let json_body = fs::read_to_string(&output_json).expect("failed to read report json");

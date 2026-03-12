@@ -1,0 +1,27 @@
+{
+  "java_target": "java21",
+  "javac_check": null,
+  "total_statements": 5,
+  "total_symbols": 2,
+  "symbols": [
+    {"name":"3","type":"number","assigned_lines":[],"referenced_lines":[]},
+    {"name":"IDX","type":"number","assigned_lines":[2,5],"referenced_lines":[3,5]}
+  ],
+  "operation_summary": {
+    "implemented": 4,
+    "stub": 0,
+    "planned": 0
+  },
+  "operations": [
+    {"name": "CALLP", "count": 1, "level": "implemented"},
+    {"name": "DOU", "count": 1, "level": "implemented"},
+    {"name": "ENDDO", "count": 1, "level": "implemented"},
+    {"name": "EVAL", "count": 2, "level": "implemented"}
+  ],
+  "todos": [
+  ],
+  "subroutine_routes": [
+  ],
+  "diagnostics": [
+  ]
+}

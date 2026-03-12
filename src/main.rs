@@ -3,6 +3,7 @@ mod parser;
 mod report;
 mod transpiler;
 
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -781,7 +782,7 @@ fn print_summary(program: &Program, ir_program: &IrProgram, target: JavaTarget) 
     if !program.diagnostics.is_empty() {
         eprintln!("diagnostics:");
         for d in &program.diagnostics {
-            eprintln!("  - {d}");
+            eprintln!("  - {}", d.as_text());
         }
     }
     if !program.op_stats.is_empty() {
@@ -793,6 +794,15 @@ fn print_summary(program: &Program, ir_program: &IrProgram, target: JavaTarget) 
                 SupportLevel::Planned => "planned",
             };
             eprintln!("  - {:<10} count={} level={}", stat.name, stat.count, level);
+        }
+    }
+    if !program.subroutine_routes.is_empty() {
+        eprintln!("subroutine routes:");
+        for route in &program.subroutine_routes {
+            eprintln!(
+                "  - {} -> {} (line {})",
+                route.caller, route.callee, route.line
+            );
         }
     }
     if !ir_program.symbols.is_empty() {
@@ -884,6 +894,7 @@ fn write_perf_report_json(
     })?;
 
     let ok_rows: Vec<&BatchMetricsRow> = rows.iter().filter(|r| r.status == "ok").collect();
+    let ng_rows: Vec<&BatchMetricsRow> = rows.iter().filter(|r| r.status == "ng").collect();
     let elapsed: Vec<u128> = ok_rows.iter().map(|r| r.elapsed_ms).collect();
     let p50 = percentile(&elapsed, 50);
     let p95 = percentile(&elapsed, 95);
@@ -898,6 +909,18 @@ fn write_perf_report_json(
     } else {
         ok_rows.iter().map(|r| r.todo_rate).sum::<f64>() / ok_rows.len() as f64
     };
+    let avg_ms_per_kib = if ok_rows.is_empty() {
+        0.0
+    } else {
+        ok_rows
+            .iter()
+            .map(|r| {
+                let kib = (r.input_bytes as f64 / 1024.0).max(0.001);
+                r.elapsed_ms as f64 / kib
+            })
+            .sum::<f64>()
+            / ok_rows.len() as f64
+    };
 
     let mut slow_rows = ok_rows.clone();
     slow_rows.sort_by(|a, b| b.elapsed_ms.cmp(&a.elapsed_ms));
@@ -911,26 +934,50 @@ fn write_perf_report_json(
     });
     todo_rows.truncate(5);
 
+    let threshold_failed = 0usize;
+    let threshold_p95_ms = p50.saturating_mul(2).max(20);
+    let threshold_avg_todo_rate = 0.20_f64;
+    let threshold_jobs_min = if rows.len() >= 4 { 2usize } else { 1usize };
+
+    let signal_failed = failed > threshold_failed;
+    let signal_slow_tail = p95 > threshold_p95_ms;
+    let signal_high_todo = avg_todo >= threshold_avg_todo_rate;
+    let signal_low_parallelism = jobs < threshold_jobs_min;
+
     let mut recommendations: Vec<String> = Vec::new();
-    if failed > 0 {
+    if signal_failed {
+        if !ng_rows.is_empty() {
+            let categories = collect_failure_categories(&ng_rows);
+            let keys: Vec<String> = categories.iter().map(|c| c.0.clone()).collect();
+            recommendations.push(format!(
+                "失敗カテゴリ: {}。category別の対応を優先してください。",
+                keys.join(", ")
+            ));
+        }
         recommendations.push(format!(
             "変換失敗が {} 件あります。失敗ファイルの文字コード・構文差分を先に解消してください。",
             failed
         ));
     }
-    if jobs <= 1 && success >= 4 {
+    if signal_low_parallelism {
         recommendations.push(String::from(
-            "並列度が低いです。CPUコア数に応じて --jobs を上げて処理時間を短縮してください。",
+            "並列度が低いです。CPUコア数に応じて --jobs を上げて処理時間を短縮してください。"
+        ));
+        recommendations.push(format!(
+            "根拠: jobs={} < threshold_jobs_min={}",
+            jobs, threshold_jobs_min
         ));
     }
-    if p95 > p50.saturating_mul(2) && p95 >= 20 {
-        recommendations.push(String::from(
-            "p95 が p50 より大きく偏っています。重いファイルを先に分離して段階実行してください。",
+    if signal_slow_tail {
+        recommendations.push(format!(
+            "p95 が偏っています（p50={}ms, p95={}ms, threshold={}ms）。重いファイルを先に分離して段階実行してください。",
+            p50, p95, threshold_p95_ms
         ));
     }
-    if avg_todo >= 0.20 {
-        recommendations.push(String::from(
-            "TODO率が高めです。未対応命令（CHAIN/SETLL/READE/EXSR 等）の優先実装で手戻りを減らしてください。",
+    if signal_high_todo {
+        recommendations.push(format!(
+            "TODO率が高めです（avg_todo_rate={:.4}, threshold={:.4}）。未対応命令（CHAIN/SETLL/READE/EXSR 等）の優先実装で手戻りを減らしてください。",
+            avg_todo, threshold_avg_todo_rate
         ));
     }
     if recommendations.is_empty() {
@@ -948,7 +995,26 @@ fn write_perf_report_json(
     out.push_str(&format!("    \"p95_ms\": {},\n", p95));
     out.push_str(&format!("    \"p99_ms\": {},\n", p99));
     out.push_str(&format!("    \"avg_ms\": {:.3},\n", avg_ms));
-    out.push_str(&format!("    \"avg_todo_rate\": {:.4}\n", avg_todo));
+    out.push_str(&format!("    \"avg_todo_rate\": {:.4},\n", avg_todo));
+    out.push_str(&format!("    \"avg_ms_per_kib\": {:.4}\n", avg_ms_per_kib));
+    out.push_str("  },\n");
+    out.push_str("  \"thresholds\": {\n");
+    out.push_str(&format!("    \"failed_max\": {},\n", threshold_failed));
+    out.push_str(&format!("    \"p95_ms_warn\": {},\n", threshold_p95_ms));
+    out.push_str(&format!(
+        "    \"avg_todo_rate_warn\": {:.4},\n",
+        threshold_avg_todo_rate
+    ));
+    out.push_str(&format!("    \"jobs_min\": {}\n", threshold_jobs_min));
+    out.push_str("  },\n");
+    out.push_str("  \"signals\": {\n");
+    out.push_str(&format!("    \"has_failures\": {},\n", signal_failed));
+    out.push_str(&format!("    \"slow_tail\": {},\n", signal_slow_tail));
+    out.push_str(&format!("    \"high_todo\": {},\n", signal_high_todo));
+    out.push_str(&format!(
+        "    \"low_parallelism\": {}\n",
+        signal_low_parallelism
+    ));
     out.push_str("  },\n");
     out.push_str("  \"slow_files\": [\n");
     for (idx, row) in slow_rows.iter().enumerate() {
@@ -977,6 +1043,23 @@ fn write_perf_report_json(
         ));
     }
     out.push_str("  ],\n");
+    out.push_str("  \"failure_categories\": [\n");
+    let categories = collect_failure_categories(&ng_rows);
+    for (idx, (key, label, count, samples)) in categories.iter().enumerate() {
+        let comma = if idx + 1 == categories.len() { "" } else { "," };
+        out.push_str(&format!(
+            "    {{\"key\":\"{}\",\"label\":\"{}\",\"count\":{},\"samples\":[",
+            json_escape(key),
+            json_escape(label),
+            count
+        ));
+        for (sidx, sample) in samples.iter().enumerate() {
+            let scomma = if sidx + 1 == samples.len() { "" } else { "," };
+            out.push_str(&format!("\"{}\"{}", json_escape(sample), scomma));
+        }
+        out.push_str(&format!("]}}{}\n", comma));
+    }
+    out.push_str("  ],\n");
     out.push_str("  \"recommendations\": [\n");
     for (idx, rec) in recommendations.iter().enumerate() {
         let comma = if idx + 1 == recommendations.len() {
@@ -990,6 +1073,55 @@ fn write_perf_report_json(
     out.push_str("}\n");
 
     fs::write(path, out).map_err(|e| format!("failed to write perf report {}: {e}", path.display()))
+}
+
+fn collect_failure_categories(ng_rows: &[&BatchMetricsRow]) -> Vec<(String, String, usize, Vec<String>)> {
+    let mut map: BTreeMap<String, (String, usize, Vec<String>)> = BTreeMap::new();
+    for row in ng_rows {
+        let err = row.error.as_deref().unwrap_or("unknown error");
+        let (key, label) = classify_failure_reason(err);
+        let entry = map
+            .entry(key.to_string())
+            .or_insert_with(|| (label.to_string(), 0usize, Vec::new()));
+        entry.1 += 1;
+        if entry.2.len() < 3 {
+            entry.2.push(format!(
+                "{}: {}",
+                row.input.display(),
+                truncate_detail(err, 160)
+            ));
+        }
+    }
+    map.into_iter()
+        .map(|(k, (label, count, samples))| (k, label, count, samples))
+        .collect()
+}
+
+fn classify_failure_reason(error: &str) -> (&'static str, &'static str) {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("snapshot mismatch") {
+        return ("snapshot_mismatch", "snapshot mismatch");
+    }
+    if lower.contains("javac check failed") {
+        return ("javac_check_failed", "javac check failed");
+    }
+    if lower.contains("valid utf-8") || (lower.contains("read failed") && lower.contains("utf-8"))
+    {
+        return ("input_decode", "input decode");
+    }
+    if lower.contains("read failed") {
+        return ("input_read", "input read");
+    }
+    if lower.contains("write failed") || lower.contains("failed to write") {
+        return ("output_write", "output write");
+    }
+    if lower.contains("stat failed") {
+        return ("input_stat", "input stat");
+    }
+    if lower.contains("worker thread panicked") {
+        return ("worker_panic", "worker panic");
+    }
+    ("other", "other")
 }
 
 fn json_escape(value: &str) -> String {
