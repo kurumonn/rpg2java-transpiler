@@ -3,6 +3,7 @@ mod parser;
 mod report;
 mod transpiler;
 
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
@@ -1150,7 +1151,7 @@ fn write_perf_report_json(
     };
 
     let mut slow_rows = ok_rows.clone();
-    slow_rows.sort_by(|a, b| b.elapsed_ms.cmp(&a.elapsed_ms));
+    slow_rows.sort_by_key(|b| Reverse(b.elapsed_ms));
     slow_rows.truncate(5);
 
     let mut todo_rows = ok_rows.clone();
