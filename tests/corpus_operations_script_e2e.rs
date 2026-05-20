@@ -19,13 +19,21 @@ fn write_file(path: &Path, content: &str) {
 
 #[test]
 fn real_corpus_pipeline_script_matches_documented_layout_and_snapshot_behavior() {
+    if cfg!(windows) {
+        eprintln!("skip: real_corpus_pipeline.sh requires a POSIX shell");
+        return;
+    }
+
     let base = make_temp_dir("corpus-ops-script");
     let input_dir = base.join("in");
     let output_dir = base.join("out");
     fs::create_dir_all(&input_dir).expect("failed to create input dir");
 
     write_file(&input_dir.join("sample_a.rpg"), "EVAL A = 1\nWRITE REC_A\n");
-    write_file(&input_dir.join("sample_b.rpg"), "EVAL B = 2\nIF B *GT 0\nENDIF\n");
+    write_file(
+        &input_dir.join("sample_b.rpg"),
+        "EVAL B = 2\nIF B *GT 0\nENDIF\n",
+    );
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script = manifest_dir.join("scripts").join("real_corpus_pipeline.sh");
@@ -48,7 +56,12 @@ fn real_corpus_pipeline_script_matches_documented_layout_and_snapshot_behavior()
 
     assert!(output_dir.join("batch").join("SampleA.java").exists());
     assert!(output_dir.join("batch").join("SampleB.java").exists());
-    assert!(output_dir.join("batch").join("SampleA.report.json").exists());
+    assert!(
+        output_dir
+            .join("batch")
+            .join("SampleA.report.json")
+            .exists()
+    );
     assert!(output_dir.join("batch").join("SampleB.report.md").exists());
     assert!(output_dir.join("snapshots").join("SampleA.java").exists());
     assert!(output_dir.join("snapshots").join("SampleB.java").exists());
@@ -71,7 +84,10 @@ fn real_corpus_pipeline_script_matches_documented_layout_and_snapshot_behavior()
         String::from_utf8_lossy(&second.stderr)
     );
 
-    write_file(&input_dir.join("sample_a.rpg"), "EVAL A = 99\nWRITE REC_A\n");
+    write_file(
+        &input_dir.join("sample_a.rpg"),
+        "EVAL A = 99\nWRITE REC_A\n",
+    );
     let third = Command::new("bash")
         .arg(&script)
         .arg(&input_dir)

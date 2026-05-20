@@ -18,6 +18,10 @@
     "stub": 2,
     "planned": 0
   },
+  "top_unsupported_operations": [
+    {"name":"CHAIN","count":1,"level":"stub"},
+    {"name":"EXSR","count":1,"level":"stub"}
+  ],
   "operations": [
     {"name": "CHAIN", "count": 1, "level": "stub"},
     {"name": "ELSE", "count": 1, "level": "implemented"},
@@ -32,6 +36,14 @@
   ],
   "subroutine_routes": [
     {"caller":"MAIN","callee":"LOGERR","line":3}
+  ],
+  "source_map": [
+    {"rpg_line":1,"java_line":13,"kind":"todo","note":"CHAIN"},
+    {"rpg_line":2,"java_line":14,"kind":"if","note":"*IN90"},
+    {"rpg_line":3,"java_line":15,"kind":"todo","note":"EXSR"},
+    {"rpg_line":4,"java_line":16,"kind":"else","note":""},
+    {"rpg_line":5,"java_line":17,"kind":"assign","note":"CNT"},
+    {"rpg_line":6,"java_line":18,"kind":"endif","note":""}
   ],
   "diagnostics": [
   ]

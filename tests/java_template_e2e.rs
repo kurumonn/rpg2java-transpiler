@@ -47,8 +47,14 @@ fn symbols_do_not_collide_with_class_name_or_main_args() {
     let java_body = fs::read_to_string(&output_java).expect("failed to read java output");
     assert!(java_body.contains("public class Collision"));
     assert!(java_body.contains("double args_2 = 0;"), "java={java_body}");
-    assert!(java_body.contains("double Collision_2 = 0;"), "java={java_body}");
-    assert!(java_body.contains("Collision_2 = args_2;"), "java={java_body}");
+    assert!(
+        java_body.contains("double Collision_2 = 0;"),
+        "java={java_body}"
+    );
+    assert!(
+        java_body.contains("Collision_2 = args_2;"),
+        "java={java_body}"
+    );
 }
 
 #[test]

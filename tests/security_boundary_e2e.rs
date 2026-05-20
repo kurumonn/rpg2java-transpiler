@@ -34,7 +34,10 @@ fn single_mode_invalid_utf8_returns_error_without_panic() {
 
     assert!(!output.status.success(), "must fail for invalid utf8");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("failed to read input file"), "stderr={stderr}");
+    assert!(
+        stderr.contains("failed to read input file"),
+        "stderr={stderr}"
+    );
     assert!(
         !stderr.to_ascii_lowercase().contains("panic"),
         "stderr={stderr}"

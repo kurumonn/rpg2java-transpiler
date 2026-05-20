@@ -13,6 +13,22 @@ fn make_temp_dir(name: &str) -> PathBuf {
     dir
 }
 
+fn success_command() -> &'static str {
+    if cfg!(windows) {
+        "cmd /C exit /B 0"
+    } else {
+        "/bin/true"
+    }
+}
+
+fn failure_command() -> &'static str {
+    if cfg!(windows) {
+        "cmd /C exit /B 1"
+    } else {
+        "/bin/false"
+    }
+}
+
 #[test]
 fn javac_check_requires_output_in_single_mode() {
     let base = make_temp_dir("javac-check-no-output");
@@ -56,7 +72,7 @@ fn javac_check_accepts_custom_success_command() {
         .arg(&output_md)
         .arg("--javac-check")
         .arg("--javac-cmd")
-        .arg("/bin/true")
+        .arg(success_command())
         .output()
         .expect("failed to execute binary");
 
@@ -93,7 +109,7 @@ fn javac_check_reports_failure_with_custom_command() {
         .arg(&output_md)
         .arg("--javac-check")
         .arg("--javac-cmd")
-        .arg("/bin/false")
+        .arg(failure_command())
         .output()
         .expect("failed to execute binary");
 

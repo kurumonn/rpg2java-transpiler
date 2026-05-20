@@ -17,6 +17,10 @@
 | ENDDO | 1 | implemented |
 | EVAL | 2 | implemented |
 
+## Top Unsupported Operations
+
+- none
+
 ## Symbols
 
 | Symbol | Type | Assigned Lines | Referenced Lines |
@@ -31,6 +35,16 @@
 ## Subroutine Routes
 
 - none
+
+## Source Map
+
+| RPG Line | Java Line | Kind | Note |
+|---:|---:|---|---|
+| 2 | 7 | assign | IDX |
+| 3 | 8 | loop | IDX *GT 3 |
+| 4 | 9 | call | PROCESS_ROW |
+| 5 | 10 | assign | IDX |
+| 6 | 11 | enddo |  |
 
 ## Diagnostics
 

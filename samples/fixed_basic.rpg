@@ -1,0 +1,18 @@
+000100C                   EVAL      1001          CUSTOMER_ID
+000200C                   EVAL      'KURUMON'     CUSTOMER_NAME
+000300C                   EVAL      15000         AMOUNT
+000400C                   EVAL      1500          TAX
+000500C                   EVAL      AMOUNT + TAX  TOTAL
+000600C                   IF        TOTAL > 10000
+000700C                   EVAL      'HIGH'        STATUS
+000800C                   ELSE
+000900C                   EVAL      'NORMAL'      STATUS
+001000C                   ENDIF
+001100C                   DOU       TOTAL > 20000
+001200C                   EVAL      TOTAL + 1000  TOTAL
+001300C                   ENDDO
+001400C                   CALLP     SEND_NOTICE
+001500C                   EVAL      0             CUSTOMER_FILE
+001600C                   EVAL      0             OUTPUT_FILE
+001700C                   READ      CUSTOMER_FILE
+001800C                   WRITE     OUTPUT_FILE

@@ -24,6 +24,13 @@ struct Cli {
     update_snapshots: bool,
     report_json: Option<PathBuf>,
     report_md: Option<PathBuf>,
+    report_html: Option<PathBuf>,
+    source_map: Option<PathBuf>,
+    html_report: bool,
+    source_map_report: bool,
+    strict: bool,
+    fail_on_todo_rate: Option<f64>,
+    dry_run: bool,
     metrics_csv: Option<PathBuf>,
     perf_report_json: Option<PathBuf>,
     javac_check: bool,
@@ -39,6 +46,9 @@ struct BatchConfig {
     output_dir: PathBuf,
     snapshot_dir: Option<PathBuf>,
     update_snapshots: bool,
+    report_html: bool,
+    source_map: bool,
+    dry_run: bool,
     mode: ParseMode,
     java_target: JavaTarget,
     javac_check: bool,
@@ -74,6 +84,9 @@ struct BatchMetricsRow {
 
 fn run() -> Result<(), String> {
     let args = parse_args()?;
+    if args.dry_run {
+        eprintln!("dry-run: validation completed; no files will be written");
+    }
     if let Some(batch_dir) = &args.batch_dir {
         return run_batch(&args, batch_dir);
     }
@@ -87,19 +100,26 @@ fn run() -> Result<(), String> {
 
     let program: Program = parser::parse_program_with_mode(&source, args.mode);
     let ir_program: IrProgram = ir::build_ir(&program);
-    let java = transpiler::to_java(&ir_program, &args.class_name, args.java_target);
+    let transpiler::JavaOutput {
+        java,
+        source_map: source_map_entries,
+    } = transpiler::to_java_with_source_map(&ir_program, &args.class_name, args.java_target);
 
     let output_path = if let Some(out) = &args.output {
-        fs::write(out, &java)
-            .map_err(|e| format!("failed to write output file {}: {e}", out.display()))?;
-        Some(out.clone())
+        if args.dry_run {
+            Some(out.clone())
+        } else {
+            fs::write(out, &java)
+                .map_err(|e| format!("failed to write output file {}: {e}", out.display()))?;
+            Some(out.clone())
+        }
     } else {
         println!("{java}");
         None
     };
 
     let mut javac_check_summary: Option<report::JavacCheckSummary> = None;
-    if args.javac_check {
+    if args.javac_check && !args.dry_run {
         let out = output_path
             .as_ref()
             .ok_or_else(|| String::from("--javac-check requires --output in single-file mode"))?;
@@ -111,22 +131,31 @@ fn run() -> Result<(), String> {
         verify_or_update_snapshot(snapshot_dir, &name, &java, args.update_snapshots)?;
     }
 
-    report::write_reports(
-        &program,
-        &ir_program,
-        args.java_target.as_str(),
-        javac_check_summary.as_ref(),
-        args.report_json.as_deref(),
-        args.report_md.as_deref(),
-    )?;
+    if !args.dry_run {
+        report::write_reports(
+            &program,
+            &ir_program,
+            args.java_target.as_str(),
+            javac_check_summary.as_ref(),
+            &source_map_entries,
+            report::ReportOutputs {
+                json_path: args.report_json.as_deref(),
+                md_path: args.report_md.as_deref(),
+                html_path: args.report_html.as_deref(),
+                source_map_path: args.source_map.as_deref(),
+            },
+        )?;
+    }
 
-    if let Some(check) = javac_check_summary.as_ref() {
-        if !check.success {
-            return Err(format!(
-                "javac check failed for output with command '{}': {}",
-                check.command, check.detail
-            ));
-        }
+    enforce_todo_policy(&ir_program, args.strict, args.fail_on_todo_rate)?;
+
+    if let Some(check) = javac_check_summary.as_ref()
+        && !check.success
+    {
+        return Err(format!(
+            "javac check failed for output with command '{}': {}",
+            check.command, check.detail
+        ));
     }
 
     print_summary(&program, &ir_program, args.java_target);
@@ -138,12 +167,14 @@ fn run_batch(args: &Cli, batch_dir: &Path) -> Result<(), String> {
         .output_dir
         .clone()
         .unwrap_or_else(|| PathBuf::from("./out/batch"));
-    fs::create_dir_all(&output_dir).map_err(|e| {
-        format!(
-            "failed to create output directory {}: {e}",
-            output_dir.display()
-        )
-    })?;
+    if !args.dry_run {
+        fs::create_dir_all(&output_dir).map_err(|e| {
+            format!(
+                "failed to create output directory {}: {e}",
+                output_dir.display()
+            )
+        })?;
+    }
 
     let mut targets: Vec<PathBuf> = Vec::new();
     for entry in fs::read_dir(batch_dir).map_err(|e| {
@@ -179,6 +210,9 @@ fn run_batch(args: &Cli, batch_dir: &Path) -> Result<(), String> {
         output_dir: output_dir.clone(),
         snapshot_dir: args.snapshot_dir.clone(),
         update_snapshots: args.update_snapshots,
+        report_html: args.html_report,
+        source_map: args.source_map_report,
+        dry_run: args.dry_run,
         mode: args.mode,
         java_target: args.java_target,
         javac_check: args.javac_check,
@@ -245,13 +279,18 @@ fn run_batch(args: &Cli, batch_dir: &Path) -> Result<(), String> {
     }
 
     if let Some(metrics_path) = &args.metrics_csv {
-        write_metrics_csv(metrics_path, &metrics, ok, ng)?;
+        if !args.dry_run {
+            write_metrics_csv(metrics_path, &metrics, ok, ng)?;
+        }
         eprintln!("metrics: {}", metrics_path.display());
     }
     if let Some(report_path) = resolve_perf_report_path(args) {
-        write_perf_report_json(&report_path, &metrics, ok, ng, args.jobs)?;
+        if !args.dry_run {
+            write_perf_report_json(&report_path, &metrics, ok, ng, args.jobs)?;
+        }
         eprintln!("perf report: {}", report_path.display());
     }
+    enforce_batch_todo_policy(&metrics, args.strict, args.fail_on_todo_rate)?;
 
     eprintln!(
         "batch complete: success={} failed={} output={} jobs={}",
@@ -325,48 +364,73 @@ fn run_batch_parallel(
 
 fn process_batch_file(input: &Path, config: &BatchConfig) -> Result<BatchFileReport, String> {
     let metadata =
-        fs::metadata(&input).map_err(|e| format!("stat failed {}: {e}", input.display()))?;
+        fs::metadata(input).map_err(|e| format!("stat failed {}: {e}", input.display()))?;
     let source =
-        fs::read_to_string(&input).map_err(|e| format!("read failed {}: {e}", input.display()))?;
+        fs::read_to_string(input).map_err(|e| format!("read failed {}: {e}", input.display()))?;
     let class_name = class_name_from_path(input);
 
     let program: Program = parser::parse_program_with_mode(&source, config.mode);
     let ir_program: IrProgram = ir::build_ir(&program);
-    let java = transpiler::to_java(&ir_program, &class_name, config.java_target);
+    let transpiler::JavaOutput {
+        java,
+        source_map: source_map_entries,
+    } = transpiler::to_java_with_source_map(&ir_program, &class_name, config.java_target);
 
     let java_name = format!("{class_name}.java");
     let java_out = config.output_dir.join(&java_name);
-    fs::write(&java_out, &java).map_err(|e| format!("write failed {}: {e}", java_out.display()))?;
+    if !config.dry_run {
+        fs::write(&java_out, &java)
+            .map_err(|e| format!("write failed {}: {e}", java_out.display()))?;
+    }
 
     let mut javac_check_summary: Option<report::JavacCheckSummary> = None;
-    if config.javac_check {
+    if config.javac_check && !config.dry_run {
         javac_check_summary = Some(run_javac_check(&java_out, &config.javac_cmd));
     }
 
     if let Some(snapshot_dir) = &config.snapshot_dir {
-        verify_or_update_snapshot(snapshot_dir, &java_name, &java, config.update_snapshots)?;
+        if config.dry_run {
+            eprintln!("dry-run: skip snapshot write/check for {}", java_name);
+        } else {
+            verify_or_update_snapshot(snapshot_dir, &java_name, &java, config.update_snapshots)?;
+        }
     }
 
     let report_json = config.output_dir.join(format!("{class_name}.report.json"));
     let report_md = config.output_dir.join(format!("{class_name}.report.md"));
-    report::write_reports(
-        &program,
-        &ir_program,
-        config.java_target.as_str(),
-        javac_check_summary.as_ref(),
-        Some(&report_json),
-        Some(&report_md),
-    )?;
+    let report_html = config
+        .report_html
+        .then(|| config.output_dir.join(format!("{class_name}.report.html")));
+    let source_map_path = config.source_map.then(|| {
+        config
+            .output_dir
+            .join(format!("{class_name}.source-map.json"))
+    });
+    if !config.dry_run {
+        report::write_reports(
+            &program,
+            &ir_program,
+            config.java_target.as_str(),
+            javac_check_summary.as_ref(),
+            &source_map_entries,
+            report::ReportOutputs {
+                json_path: Some(&report_json),
+                md_path: Some(&report_md),
+                html_path: report_html.as_deref(),
+                source_map_path: source_map_path.as_deref(),
+            },
+        )?;
+    }
 
-    if let Some(check) = javac_check_summary.as_ref() {
-        if !check.success {
-            return Err(format!(
-                "javac check failed for {} with command '{}': {}",
-                java_out.display(),
-                check.command,
-                check.detail
-            ));
-        }
+    if let Some(check) = javac_check_summary.as_ref()
+        && !check.success
+    {
+        return Err(format!(
+            "javac check failed for {} with command '{}': {}",
+            java_out.display(),
+            check.command,
+            check.detail
+        ));
     }
 
     let todos = ir_program
@@ -432,8 +496,8 @@ fn write_metrics_csv(
     }
     out.push_str(&format!("SUMMARY,,,,,,,{},{},,,\n", success, failed));
     out.push_str(&format!(
-        "PERCENTILE,,,{},,,,,,,,\n",
-        format!("p50_ms={};p95_ms={};p99_ms={}", p50, p95, p99)
+        "PERCENTILE,,,p50_ms={};p95_ms={};p99_ms={};,,,,,,,\n",
+        p50, p95, p99
     ));
     append_size_band_summary(&mut out, rows);
     fs::write(path, out).map_err(|e| format!("failed to write metrics CSV {}: {e}", path.display()))
@@ -553,6 +617,18 @@ fn class_name_from_path(path: &Path) -> String {
 }
 
 fn parse_args() -> Result<Cli, String> {
+    let mut raw_args: Vec<String> = env::args().collect();
+    if raw_args.get(1).map(|s| s.as_str()) == Some("doctor") {
+        print_doctor();
+        std::process::exit(0);
+    }
+    if matches!(
+        raw_args.get(1).map(|s| s.as_str()),
+        Some("convert" | "batch" | "report" | "verify" | "coverage")
+    ) {
+        raw_args.remove(1);
+    }
+
     let mut input: Option<PathBuf> = None;
     let mut batch_dir: Option<PathBuf> = None;
     let mut output: Option<PathBuf> = None;
@@ -561,6 +637,13 @@ fn parse_args() -> Result<Cli, String> {
     let mut update_snapshots = false;
     let mut report_json: Option<PathBuf> = None;
     let mut report_md: Option<PathBuf> = None;
+    let mut report_html: Option<PathBuf> = None;
+    let mut source_map: Option<PathBuf> = None;
+    let mut html_report = false;
+    let mut source_map_report = false;
+    let mut strict = false;
+    let mut fail_on_todo_rate: Option<f64> = None;
+    let mut dry_run = false;
     let mut metrics_csv: Option<PathBuf> = None;
     let mut perf_report_json: Option<PathBuf> = None;
     let mut javac_check = false;
@@ -570,7 +653,7 @@ fn parse_args() -> Result<Cli, String> {
     let mut mode = ParseMode::Auto;
     let mut jobs: usize = 1;
 
-    let args: Vec<String> = env::args().collect();
+    let args: Vec<String> = raw_args;
     let mut i = 1usize;
     while i < args.len() {
         match args[i].as_str() {
@@ -639,6 +722,55 @@ fn parse_args() -> Result<Cli, String> {
                     .get(i)
                     .ok_or_else(|| String::from("missing value for --report-md"))?;
                 report_md = Some(PathBuf::from(value));
+            }
+            "--report-html" => {
+                i += 1;
+                let value = args
+                    .get(i)
+                    .ok_or_else(|| String::from("missing value for --report-html"))?;
+                report_html = Some(PathBuf::from(value));
+            }
+            "--source-map" => {
+                i += 1;
+                let value = args
+                    .get(i)
+                    .ok_or_else(|| String::from("missing value for --source-map"))?;
+                source_map = Some(PathBuf::from(value));
+            }
+            "--html-report" => {
+                html_report = true;
+            }
+            "--source-map-report" => {
+                source_map_report = true;
+            }
+            "--strict" => {
+                strict = true;
+            }
+            "--fail-on-todo-rate" => {
+                i += 1;
+                let value = args
+                    .get(i)
+                    .ok_or_else(|| String::from("missing value for --fail-on-todo-rate"))?;
+                let parsed = value
+                    .parse::<f64>()
+                    .map_err(|_| format!("invalid --fail-on-todo-rate '{}'", value))?;
+                if !(0.0..=1.0).contains(&parsed) {
+                    return Err(String::from(
+                        "--fail-on-todo-rate must be between 0.0 and 1.0",
+                    ));
+                }
+                fail_on_todo_rate = Some(parsed);
+            }
+            "--dry-run" => {
+                dry_run = true;
+            }
+            "--redact" => {
+                // Reserved for commercial report masking. Current parser never executes source.
+            }
+            "--config" | "--profile" | "--baseline" | "--sarif" => {
+                i += 1;
+                args.get(i)
+                    .ok_or_else(|| format!("missing value for {}", args[i - 1]))?;
             }
             "--metrics-csv" => {
                 i += 1;
@@ -710,6 +842,16 @@ fn parse_args() -> Result<Cli, String> {
             "--report-json/--report-md are per-file in batch mode and auto-generated to --output-dir",
         ));
     }
+    if batch_dir.is_some() && report_html.is_some() {
+        return Err(String::from(
+            "--report-html is per-file in batch mode and auto-generated when --html-report is used",
+        ));
+    }
+    if batch_dir.is_some() && source_map.is_some() {
+        return Err(String::from(
+            "--source-map is per-file in batch mode and auto-generated when --source-map-report is used",
+        ));
+    }
     if batch_dir.is_none() && metrics_csv.is_some() {
         return Err(String::from(
             "--metrics-csv is available only in --batch-dir mode",
@@ -735,6 +877,13 @@ fn parse_args() -> Result<Cli, String> {
         update_snapshots,
         report_json,
         report_md,
+        report_html,
+        source_map,
+        html_report,
+        source_map_report,
+        strict,
+        fail_on_todo_rate,
+        dry_run,
         metrics_csv,
         perf_report_json,
         javac_check,
@@ -748,21 +897,38 @@ fn parse_args() -> Result<Cli, String> {
 
 fn print_help() {
     println!("rpg2java-transpiler");
+    println!("Commands:");
+    println!("  convert   Convert one RPG source file");
+    println!("  batch     Convert a directory of RPG source files");
+    println!("  report    Reserved alias for report-oriented conversion flows");
+    println!("  verify    Reserved alias for verification-oriented conversion flows");
+    println!("  coverage  Reserved alias for coverage-oriented batch flows");
+    println!("  doctor    Print local environment diagnostics");
     println!("Single-file mode:");
     println!(
-        "  rpg2java-transpiler --input <file> [--output <file>] [--class-name <name>] [--java-target java21|java25-stable] [--mode auto|free|fixed]"
+        "  rpg2java-transpiler convert --input <file> [--output <file>] [--class-name <name>] [--java-target java21|java25-stable] [--mode auto|free|fixed]"
     );
-    println!("                         [--report-json <file>] [--report-md <file>]");
     println!(
-        "                         [--snapshot-dir <dir>] [--update-snapshots] [--javac-check] [--javac-cmd <cmd>]"
+        "                         [--report-json <file>] [--report-md <file>] [--report-html <file>] [--source-map <file>]"
+    );
+    println!(
+        "                         [--snapshot-dir <dir>] [--update-snapshots] [--javac-check] [--javac-cmd <cmd>] [--strict] [--fail-on-todo-rate <0.0-1.0>] [--dry-run]"
     );
     println!("Batch mode:");
     println!(
-        "  rpg2java-transpiler --batch-dir <dir> [--output-dir <dir>] [--java-target java21|java25-stable] [--mode auto|free|fixed] [--jobs <n>]"
+        "  rpg2java-transpiler batch --batch-dir <dir> [--output-dir <dir>] [--java-target java21|java25-stable] [--mode auto|free|fixed] [--jobs <n>]"
     );
     println!(
-        "                         [--snapshot-dir <dir>] [--update-snapshots] [--metrics-csv <file>] [--perf-report-json <file>] [--javac-check] [--javac-cmd <cmd>]"
+        "                         [--snapshot-dir <dir>] [--update-snapshots] [--metrics-csv <file>] [--perf-report-json <file>] [--html-report] [--source-map-report] [--javac-check] [--javac-cmd <cmd>] [--strict] [--fail-on-todo-rate <0.0-1.0>] [--dry-run]"
     );
+}
+
+fn print_doctor() {
+    println!("rpg2java doctor");
+    println!("version: {}", env!("CARGO_PKG_VERSION"));
+    println!("java targets: java21, java25-stable");
+    println!("reports: json, markdown, html, source-map");
+    println!("security: no dynamic RPG execution; local file conversion only");
 }
 
 fn parse_mode(value: &str) -> Result<ParseMode, String> {
@@ -819,6 +985,62 @@ fn print_summary(program: &Program, ir_program: &IrProgram, target: JavaTarget) 
     }
 }
 
+fn enforce_todo_policy(
+    ir_program: &IrProgram,
+    strict: bool,
+    fail_on_todo_rate: Option<f64>,
+) -> Result<(), String> {
+    let todos = ir_program
+        .statements
+        .iter()
+        .filter(|s| matches!(s, ir::IrStmt::Todo { .. }))
+        .count();
+    let total = ir_program.statements.len();
+    if strict && todos > 0 {
+        return Err(format!("strict mode failed: {} TODO item(s) found", todos));
+    }
+    if let Some(limit) = fail_on_todo_rate {
+        let rate = if total == 0 {
+            0.0
+        } else {
+            todos as f64 / total as f64
+        };
+        if rate > limit {
+            return Err(format!(
+                "TODO rate {:.4} exceeds threshold {:.4}",
+                rate, limit
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn enforce_batch_todo_policy(
+    metrics: &[BatchMetricsRow],
+    strict: bool,
+    fail_on_todo_rate: Option<f64>,
+) -> Result<(), String> {
+    let todos = metrics.iter().map(|r| r.todos).sum::<usize>();
+    let statements = metrics.iter().map(|r| r.statements).sum::<usize>();
+    if strict && todos > 0 {
+        return Err(format!("strict mode failed: {} TODO item(s) found", todos));
+    }
+    if let Some(limit) = fail_on_todo_rate {
+        let rate = if statements == 0 {
+            0.0
+        } else {
+            todos as f64 / statements as f64
+        };
+        if rate > limit {
+            return Err(format!(
+                "batch TODO rate {:.4} exceeds threshold {:.4}",
+                rate, limit
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn run_javac_check(java_file: &Path, javac_cmd: &str) -> report::JavacCheckSummary {
     let mut summary = report::JavacCheckSummary {
         command: javac_cmd.to_string(),
@@ -826,7 +1048,12 @@ fn run_javac_check(java_file: &Path, javac_cmd: &str) -> report::JavacCheckSumma
         exit_code: None,
         detail: String::new(),
     };
-    let output = match Command::new(javac_cmd).arg(java_file).output() {
+    let mut parts = javac_cmd.split_whitespace();
+    let Some(command) = parts.next() else {
+        summary.detail = String::from("failed to execute command: empty command");
+        return summary;
+    };
+    let output = match Command::new(command).args(parts).arg(java_file).output() {
         Ok(out) => out,
         Err(err) => {
             summary.detail = format!("failed to execute command: {err}");
@@ -961,7 +1188,7 @@ fn write_perf_report_json(
     }
     if signal_low_parallelism {
         recommendations.push(String::from(
-            "並列度が低いです。CPUコア数に応じて --jobs を上げて処理時間を短縮してください。"
+            "並列度が低いです。CPUコア数に応じて --jobs を上げて処理時間を短縮してください。",
         ));
         recommendations.push(format!(
             "根拠: jobs={} < threshold_jobs_min={}",
@@ -1075,7 +1302,9 @@ fn write_perf_report_json(
     fs::write(path, out).map_err(|e| format!("failed to write perf report {}: {e}", path.display()))
 }
 
-fn collect_failure_categories(ng_rows: &[&BatchMetricsRow]) -> Vec<(String, String, usize, Vec<String>)> {
+fn collect_failure_categories(
+    ng_rows: &[&BatchMetricsRow],
+) -> Vec<(String, String, usize, Vec<String>)> {
     let mut map: BTreeMap<String, (String, usize, Vec<String>)> = BTreeMap::new();
     for row in ng_rows {
         let err = row.error.as_deref().unwrap_or("unknown error");
@@ -1105,8 +1334,7 @@ fn classify_failure_reason(error: &str) -> (&'static str, &'static str) {
     if lower.contains("javac check failed") {
         return ("javac_check_failed", "javac check failed");
     }
-    if lower.contains("valid utf-8") || (lower.contains("read failed") && lower.contains("utf-8"))
-    {
+    if lower.contains("valid utf-8") || (lower.contains("read failed") && lower.contains("utf-8")) {
         return ("input_decode", "input decode");
     }
     if lower.contains("read failed") {

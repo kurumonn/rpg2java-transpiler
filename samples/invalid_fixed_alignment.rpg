@@ -1,0 +1,6 @@
+     C EVAL 1001 CUSTOMER_ID
+     C IF CUSTOMER_ID > 0
+     C EVAL 'OK' STATUS
+     C ENDIF
+     C
+     C    NOTE

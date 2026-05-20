@@ -107,3 +107,17 @@ cargo test --tests
 ## 9. ライセンス
 
 MIT License
+
+## Commercial PoC additions
+
+See `docs/COMMERCIAL_POC_PLAN.md` for the `v0.1.0-alpha` commercial PoC checklist.
+
+Added commercial-facing CLI surfaces:
+
+- `convert`, `batch`, and `doctor` command aliases.
+- `--report-html <file>` for single-file HTML reports.
+- `--source-map <file>` for single-file RPG-to-Java line maps.
+- `--html-report` for per-file batch HTML reports.
+- `--source-map-report` for per-file batch source maps.
+- `--strict` and `--fail-on-todo-rate <0.0-1.0>` quality gates.
+- `--dry-run` for validation without writes.

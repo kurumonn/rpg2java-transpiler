@@ -1,0 +1,13 @@
+000100C     CUSTOMER_ID   CHAIN     CUSTOMER_FILE
+000200C     ORDER_ID      SETLL     ORDER_FILE
+000300C     ORDER_ID      READE     ORDER_FILE
+000400C                   EXSR      CALC_TOTAL
+000500C                   EVAL      12000         AMOUNT
+000600C                   EVAL      1200          TAX
+000700C                   EVAL      AMOUNT + TAX  TOTAL
+000800C                   IF        TOTAL > 10000
+000900C                   EVAL      0             ORDER_OUTPUT
+001000C                   WRITE     ORDER_OUTPUT
+001100C                   ELSE
+001200C                   CALLP     PRINT_ORDER
+001300C                   ENDIF

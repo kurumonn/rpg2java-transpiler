@@ -5,6 +5,7 @@ use crate::parser::{Program, Stmt};
 #[derive(Debug, Clone)]
 pub struct IrProgram {
     pub statements: Vec<IrStmt>,
+    pub source_lines: Vec<usize>,
     pub symbols: Vec<SymbolInfo>,
 }
 
@@ -40,13 +41,14 @@ pub enum IrStmt {
 
 pub fn build_ir(program: &Program) -> IrProgram {
     let mut ir_statements = Vec::new();
+    let mut source_lines = Vec::new();
     let mut assigned: BTreeMap<String, ValueType> = BTreeMap::new();
     let mut assigned_lines_map: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
     let mut referenced_lines_map: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
 
     for (idx, stmt) in program.statements.iter().enumerate() {
         let line = *program.statement_lines.get(idx).unwrap_or(&0);
-        match stmt {
+        let ir_stmt = match stmt {
             Stmt::Assign { left, right } => {
                 let inferred = infer_expr_type(right, &assigned);
                 if inferred != ValueType::Unknown || !assigned.contains_key(left) {
@@ -60,57 +62,59 @@ pub fn build_ir(program: &Program) -> IrProgram {
                 if inferred == ValueType::Number {
                     hint_numeric_vars(right, &mut assigned);
                 }
-                ir_statements.push(IrStmt::Assign {
+                IrStmt::Assign {
                     left: left.clone(),
                     right: right.clone(),
-                });
+                }
             }
             Stmt::If { cond } => {
                 mark_referenced_in_expr(cond, line, &mut referenced_lines_map);
                 hint_condition_types(cond, &mut assigned);
-                ir_statements.push(IrStmt::If { cond: cond.clone() });
+                IrStmt::If { cond: cond.clone() }
             }
-            Stmt::Else => ir_statements.push(IrStmt::Else),
-            Stmt::EndIf => ir_statements.push(IrStmt::EndIf),
+            Stmt::Else => IrStmt::Else,
+            Stmt::EndIf => IrStmt::EndIf,
             Stmt::DoUntil { cond } => {
                 mark_referenced_in_expr(cond, line, &mut referenced_lines_map);
                 hint_condition_types(cond, &mut assigned);
-                ir_statements.push(IrStmt::DoUntil { cond: cond.clone() });
+                IrStmt::DoUntil { cond: cond.clone() }
             }
-            Stmt::EndDo => ir_statements.push(IrStmt::EndDo),
-            Stmt::Call { proc_name } => ir_statements.push(IrStmt::Call {
+            Stmt::EndDo => IrStmt::EndDo,
+            Stmt::Call { proc_name } => IrStmt::Call {
                 proc_name: proc_name.clone(),
-            }),
+            },
             Stmt::Write { target } => {
                 referenced_lines_map
                     .entry(target.clone())
                     .or_default()
                     .insert(line);
-                ir_statements.push(IrStmt::Write {
+                IrStmt::Write {
                     target: target.clone(),
-                });
+                }
             }
             Stmt::Read { target } => {
                 referenced_lines_map
                     .entry(target.clone())
                     .or_default()
                     .insert(line);
-                ir_statements.push(IrStmt::Read {
+                IrStmt::Read {
                     target: target.clone(),
-                });
+                }
             }
             Stmt::Operation { op, args } => {
                 mark_referenced_in_expr(args, line, &mut referenced_lines_map);
-                ir_statements.push(IrStmt::Todo {
+                IrStmt::Todo {
                     op: Some(op.clone()),
                     src: args.clone(),
-                });
+                }
             }
-            Stmt::Raw(src) => ir_statements.push(IrStmt::Todo {
+            Stmt::Raw(src) => IrStmt::Todo {
                 op: None,
                 src: src.clone(),
-            }),
-        }
+            },
+        };
+        ir_statements.push(ir_stmt);
+        source_lines.push(line);
     }
 
     let mut symbols = Vec::new();
@@ -139,6 +143,7 @@ pub fn build_ir(program: &Program) -> IrProgram {
 
     IrProgram {
         statements: ir_statements,
+        source_lines,
         symbols,
     }
 }

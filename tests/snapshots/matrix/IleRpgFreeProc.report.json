@@ -12,6 +12,8 @@
     "stub": 0,
     "planned": 0
   },
+  "top_unsupported_operations": [
+  ],
   "operations": [
     {"name": "CALLP", "count": 1, "level": "implemented"},
     {"name": "DOU", "count": 1, "level": "implemented"},
@@ -21,6 +23,13 @@
   "todos": [
   ],
   "subroutine_routes": [
+  ],
+  "source_map": [
+    {"rpg_line":2,"java_line":7,"kind":"assign","note":"IDX"},
+    {"rpg_line":3,"java_line":8,"kind":"loop","note":"IDX *GT 3"},
+    {"rpg_line":4,"java_line":9,"kind":"call","note":"PROCESS_ROW"},
+    {"rpg_line":5,"java_line":10,"kind":"assign","note":"IDX"},
+    {"rpg_line":6,"java_line":11,"kind":"enddo","note":""}
   ],
   "diagnostics": [
   ]

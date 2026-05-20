@@ -19,6 +19,11 @@
 | EXSR | 1 | stub |
 | IF | 1 | implemented |
 
+## Top Unsupported Operations
+
+- CHAIN: 1 (stub)
+- EXSR: 1 (stub)
+
 ## Symbols
 
 | Symbol | Type | Assigned Lines | Referenced Lines |
@@ -40,6 +45,17 @@
 ## Subroutine Routes
 
 - MAIN -> LOGERR (line 3)
+
+## Source Map
+
+| RPG Line | Java Line | Kind | Note |
+|---:|---:|---|---|
+| 1 | 13 | todo | CHAIN |
+| 2 | 14 | if | *IN90 |
+| 3 | 15 | todo | EXSR |
+| 4 | 16 | else |  |
+| 5 | 17 | assign | CNT |
+| 6 | 18 | endif |  |
 
 ## Diagnostics
 

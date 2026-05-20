@@ -241,23 +241,22 @@ fn parse_fixed_line(
         }
         return Some((Stmt::Raw(raw_line.trim().to_string()), None));
     }
-    if !is_known_opcode(&opcode) {
-        if let Some((detected_opcode, col)) = find_known_opcode_with_col(raw_line) {
-            if !(26..=35).contains(&col) {
-                push_diagnostic(
-                    diagnostics,
-                    DiagnosticSeverity::Warning,
-                    "PARSER_FIXED_OPCODE_MISALIGNED",
-                    Some(line_no),
-                    Some(col),
-                    format!(
-                        "opcode '{}' is outside fixed opcode field (expected col 26-35)",
-                        detected_opcode
-                    ),
-                );
-                return Some((Stmt::Raw(raw_line.trim().to_string()), None));
-            }
-        }
+    if !is_known_opcode(&opcode)
+        && let Some((detected_opcode, col)) = find_known_opcode_with_col(raw_line)
+        && !(26..=35).contains(&col)
+    {
+        push_diagnostic(
+            diagnostics,
+            DiagnosticSeverity::Warning,
+            "PARSER_FIXED_OPCODE_MISALIGNED",
+            Some(line_no),
+            Some(col),
+            format!(
+                "opcode '{}' is outside fixed opcode field (expected col 26-35)",
+                detected_opcode
+            ),
+        );
+        return Some((Stmt::Raw(raw_line.trim().to_string()), None));
     }
 
     let stmt = match opcode.as_str() {
@@ -398,16 +397,16 @@ fn detect_spec_char(line: &str) -> char {
 
 fn parse_common_line(line: &str) -> (Stmt, Option<String>) {
     let upper = line.to_ascii_uppercase();
-    if upper.starts_with("EVAL ") {
-        if let Some((l, r)) = split_assign(&line[5..]) {
-            return (
-                Stmt::Assign {
-                    left: l.to_string(),
-                    right: r.to_string(),
-                },
-                Some(String::from("EVAL")),
-            );
-        }
+    if upper.starts_with("EVAL ")
+        && let Some((l, r)) = split_assign(&line[5..])
+    {
+        return (
+            Stmt::Assign {
+                left: l.to_string(),
+                right: r.to_string(),
+            },
+            Some(String::from("EVAL")),
+        );
     }
     if upper.starts_with("IF ") {
         return (

@@ -86,5 +86,8 @@ fn cat_operator_is_translated_to_java_concat() {
 
     let java_body = fs::read_to_string(&output_java).expect("failed to read java output");
     assert!(java_body.contains("String MSG = \"\";"), "java={java_body}");
-    assert!(java_body.contains("MSG = \"A\" + \"B\";"), "java={java_body}");
+    assert!(
+        java_body.contains("MSG = \"A\" + \"B\";"),
+        "java={java_body}"
+    );
 }
